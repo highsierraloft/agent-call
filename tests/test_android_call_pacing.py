@@ -9,7 +9,7 @@ import pytest
 
 pytest.importorskip("pipecat")
 
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
 
 from app.android_voice import AndroidVoiceSession, ClosingWindow
@@ -22,7 +22,8 @@ async def test_timed_wrapup_waits_for_quiet_and_does_not_duplicate_closing(alrea
     session._started_at = time.monotonic() - 170
     session._idle = asyncio.Event()
     session._assistant_busy = False
-    session._context = LLMContext([])
+    session._system_prompt = "Follow the approved brief."
+    session._context = LLMContext([{"role": "system", "content": session._system_prompt}])
     session._worker = SimpleNamespace(queue_frame=AsyncMock())
     session.closing = ClosingWindow()
     if already_closing:
@@ -37,7 +38,9 @@ async def test_timed_wrapup_waits_for_quiet_and_does_not_duplicate_closing(alrea
         await asyncio.wait_for(task, 1)
         if already_closing:
             session._worker.queue_frame.assert_not_awaited()
-            assert not session._context.messages
+            assert session._context.messages == [
+                {"role": "system", "content": session._system_prompt}
+            ]
         else:
             session._worker.queue_frame.assert_awaited_once()
             assert isinstance(session._worker.queue_frame.call_args.args[0], LLMRunFrame)
@@ -46,3 +49,51 @@ async def test_timed_wrapup_waits_for_quiet_and_does_not_duplicate_closing(alrea
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+def test_clock_updates_keep_recipient_last_without_growing_history():
+    session = AndroidVoiceSession.__new__(AndroidVoiceSession)
+    session._max_call_seconds = 180
+    session._started_at = time.monotonic()
+    session._system_prompt = "Follow the approved brief."
+    goodbye = {"role": "user", "content": "Thanks for the chat and goodbye."}
+    session._context = LLMContext([{"role": "system", "content": session._system_prompt}, goodbye])
+    session._add_time_notice()
+    session._add_time_notice(closing=True)
+    assert len(session._context.messages) == 2
+    assert session._context.messages[0]["role"] == "system"
+    assert session._context.messages[-1] == goodbye
+    assert str(session._context.messages[0]["content"]).count("Runtime notice:") == 1
+
+
+async def test_finish_tool_speaks_once_and_cannot_reuse_old_playback():
+    session = AndroidVoiceSession.__new__(AndroidVoiceSession)
+    session.closing = ClosingWindow()
+    session.closing.played("Goodbye.", interrupted=False)
+    session._worker = SimpleNamespace(queue_frame=AsyncMock())
+    result = AsyncMock()
+    params = SimpleNamespace(arguments={"farewell": "Goodbye."}, result_callback=result)
+    await session._finish_call(params)
+    await session._finish_call(params)
+    session._worker.queue_frame.assert_awaited_once()
+    speech = session._worker.queue_frame.call_args.args[0]
+    assert isinstance(speech, TTSSpeakFrame) and speech.text == "Goodbye."
+    assert speech.append_to_context
+    assert session.closing.guard() is None
+    assert result.call_args.kwargs["properties"].run_llm is False
+    session.closing.user_started()
+    assert session.closing.farewell is None
+
+
+@pytest.mark.parametrize("farewell", [None, "", " " * 3, "x" * 501])
+async def test_invalid_farewell_never_speaks_or_closes(farewell):
+    session = AndroidVoiceSession.__new__(AndroidVoiceSession)
+    session.closing = ClosingWindow()
+    session._worker = SimpleNamespace(queue_frame=AsyncMock())
+    result = AsyncMock()
+    await session._finish_call(
+        SimpleNamespace(arguments={"farewell": farewell}, result_callback=result)
+    )
+    session._worker.queue_frame.assert_not_awaited()
+    assert session.closing.farewell is None
+    assert not result.call_args.args[0]["closing_requested"]

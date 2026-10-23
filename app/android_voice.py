@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -22,7 +23,9 @@ from pipecat.frames.frames import (
     FunctionCallResultProperties,
     InputTransportMessageFrame,
     LLMRunFrame,
+    TTSSpeakFrame,
 )
+from pipecat.observers.user_bot_latency_observer import LatencyBreakdown, UserBotLatencyObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -51,6 +54,7 @@ from app.openrouter_tts import OPENROUTER_API_URL, OpenRouterTTSService
 from app.soniox_client import SonioxVoiceSTTService as SonioxSTTService
 
 CLOSING_RESERVE_SECONDS = 15
+logger = logging.getLogger(__name__)
 
 
 def voice_instructions(packet: ContextPacket) -> str:
@@ -94,9 +98,11 @@ def voice_instructions(packet: ContextPacket) -> str:
         "end politely. Do not promise actions outside this call or invent a transfer. "
         "Runtime time notices describe the remaining call budget; do not read them aloud. "
         "For a duration-based conversation, keep engaging until the closing notice or the "
-        "recipient wants to finish. For a short practical task, finish when the goal is met "
+        "recipient explicitly wants to finish. Mentioning plans for after this call is not "
+        "a request to end it. For a short practical task, finish when the goal is met "
         "and the recipient has no follow-up. When closing, make a brief natural reference to "
-        "the conversation, say goodbye aloud, then call finish_call with the exact farewell. "
+        "the conversation in a brief farewell passed to finish_call. The tool speaks it for "
+        "you; do not say it separately. "
         "A follow-up from the recipient cancels closing; answer it before saying goodbye again. "
         "Do not write a post-call summary. Output only words meant to be spoken, without "
         "Markdown, stage directions, or descriptions of your voice.\n"
@@ -130,6 +136,7 @@ class ClosingWindow:
 
     def request(self, farewell: str) -> None:
         self.farewell = farewell.strip()
+        self.played_revision = -1
 
     def guard(self) -> Callable[[], bool] | None:
         def normalize(value: str) -> str:
@@ -273,9 +280,16 @@ class AndroidVoiceSession:
             settings=OpenRouterVoiceLLMService.Settings(
                 model=config.dialogue_model,
                 max_tokens=512,
-                extra={"extra_body": {"reasoning": {"effort": config.reasoning_effort}}},
+                extra={
+                    "extra_body": {"reasoning": {"effort": config.reasoning_effort}}
+                    if config.reasoning_effort is not None
+                    else {}
+                },
                 provider=OpenRouterVoiceLLMService.ProviderPreferences(
-                    sort="latency", require_parameters=True
+                    sort="latency",
+                    require_parameters=True,
+                    only=[config.dialogue_provider] if config.dialogue_provider else None,
+                    allow_fallbacks=False if config.dialogue_provider else None,
                 ),
             ),
         )
@@ -300,22 +314,43 @@ class AndroidVoiceSession:
             standard_tools=[
                 FunctionSchema(
                     name="finish_call",
-                    description="Request hangup after your final spoken farewell and a reply window.",
+                    description="End the call ONLY when the recipient explicitly asks to finish, the approved task is complete, or the runtime closing notice arrives. Never use this tool for ordinary conversational replies or mentions of later plans. It speaks your farewell, then hangs up after playback and a reply window. Do not say the farewell separately.",
                     properties={
                         "farewell": {
                             "type": "string",
-                            "description": "The exact farewell you just said aloud.",
+                            "description": "The brief farewell this tool should say aloud.",
                         }
                     },
                     required=["farewell"],
                 )
             ]
         )
+        self._system_prompt = voice_instructions(packet)
         context = LLMContext(
-            messages=[{"role": "system", "content": voice_instructions(packet)}], tools=tools
+            messages=[{"role": "system", "content": self._system_prompt}], tools=tools
         )
         self._context = context
         aggregators = LLMContextAggregatorPair(context, user_params=user_params)
+        latency = UserBotLatencyObserver()
+
+        async def latency_measured(_observer: Any, breakdown: LatencyBreakdown) -> None:
+            # Keep speech and credentials out of diagnostic logs.
+            logger.info(
+                "voice_latency %s",
+                json.dumps(
+                    {
+                        "call_id": call_id,
+                        "measured_from": str(breakdown.measured_from),
+                        "seconds": round(breakdown.total_secs, 4),
+                        "parts": [
+                            {"stage": part.key, "seconds": round(part.duration_secs, 4)}
+                            for part in breakdown.contributions
+                        ],
+                    }
+                ),
+            )
+
+        latency.add_event_handler("on_latency_breakdown", latency_measured)
         self._worker = PipelineWorker(
             Pipeline(
                 [
@@ -329,24 +364,14 @@ class AndroidVoiceSession:
                     aggregators.assistant(),
                 ]
             ),
-            params=PipelineParams(audio_in_sample_rate=8000, audio_out_sample_rate=8000),
+            params=PipelineParams(
+                audio_in_sample_rate=8000, audio_out_sample_rate=8000, enable_metrics=True
+            ),
+            observers=[latency],
         )
         self._runner = WorkerRunner(handle_sigint=False)
 
-        async def finish_call(params: FunctionCallParams) -> None:
-            farewell = params.arguments.get("farewell", "")
-            if not isinstance(farewell, str) or not 1 <= len(farewell.strip()) <= 500:
-                await params.result_callback(
-                    {"closing_requested": False, "reason": "Supply the spoken farewell"}
-                )
-                return
-            self.closing.request(farewell)
-            self._schedule_closing()
-            await params.result_callback(
-                {"closing_requested": True}, properties=FunctionCallResultProperties(run_llm=False)
-            )
-
-        llm.register_function("finish_call", finish_call)
+        llm.register_function("finish_call", self._finish_call, cancel_on_interruption=True)
 
         async def pipeline_error(*_: Any) -> None:
             callbacks.failed()
@@ -397,17 +422,37 @@ class AndroidVoiceSession:
         aggregators.assistant().add_event_handler("on_assistant_turn_stopped", assistant_message)
         transport.add_event_handler("on_client_disconnected", disconnected)
 
+    async def _finish_call(self, params: FunctionCallParams) -> None:
+        farewell = params.arguments.get("farewell", "")
+        if not isinstance(farewell, str) or not 1 <= len(farewell.strip()) <= 500:
+            await params.result_callback(
+                {"closing_requested": False, "reason": "Supply a brief farewell to speak"}
+            )
+            return
+        if self.closing.farewell is None:
+            self.closing.request(farewell)
+            await self._worker.queue_frame(TTSSpeakFrame(farewell.strip(), append_to_context=True))
+        await params.result_callback(
+            {"closing_requested": True}, properties=FunctionCallResultProperties(run_llm=False)
+        )
+
     def _add_time_notice(self, *, closing: bool = False) -> None:
         remaining = max(0, int(self._max_call_seconds - (time.monotonic() - self._started_at)))
         content = f"Runtime notice: about {remaining} seconds remain in this call's time budget. "
         if closing or remaining <= CLOSING_RESERVE_SECONDS:
             content += (
                 "The time limit is near. Answer any last point briefly, wrap up warmly without "
-                "a new topic or question, then say goodbye and call finish_call."
+                "a new topic or question, then call finish_call with a brief farewell. "
+                "The tool speaks the farewell; do not say it separately."
             )
         else:
             content += "Continue the approved conversation. Do not announce this timer."
-        self._context.add_message({"role": "system", "content": content})
+        # The Gemini adapter converts additional system messages to user messages.
+        # Update the leading instruction so internal timing never becomes recipient speech.
+        self._context.messages[0] = {
+            "role": "system",
+            "content": self._system_prompt + "\n" + content,
+        }
 
     async def _request_timed_wrapup(self) -> None:
         delay = max(

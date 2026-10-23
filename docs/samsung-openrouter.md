@@ -42,7 +42,7 @@ The Android path has no owner transfer, mid-call question tool, answering-machin
 or in-call web search. If a required fact is missing, the voice agent ends politely.
 These features remain available in the separate upstream backend where documented.
 
-The latest local suite passed 796 tests with two skips and 88.22% coverage.
+The latest local suite passed 810 tests with two skips and 88.43% coverage.
 The media simulation checks connection setup, buffering, shutdown, and task cleanup without model requests.
 These checks do not prove cellular audio or acceptable conversation timing.
 One owner-controlled outbound call completed with seven transcript turns and confirmed hangup.
@@ -73,14 +73,30 @@ The longer phone test returned 23 transcript turns and ended when the owner aske
 The owner found it better but still robotic in wording and voice. Quality acceptance remains open.
 Live text-model probes covered the opening, relevant follow-ups, a request to stay, truthful identity, and closing.
 
-The next selected configuration uses `dialogue_model=anthropic/claude-haiku-4.5`, reasoning `none`,
-and Inworld TTS-2 with `inworld_voice=Wade` and `inworld_delivery_mode=CREATIVE`.
-The owner selected Wade from three identical-text audio previews. The delivery mode uses the existing Pipecat setting.
-Small model comparisons favored Haiku 4.5's shorter replies for this trial; they are not a general model ranking.
-The newer Haiku 5.5 was also evaluated. Its low-verbosity configuration produced a closing tool call without spoken text in one sample.
-Gemini 3.8 Flash with minimal reasoning added more delay in these samples.
-A full server replay of the selected combination took 1.65 seconds to PCM and completed the spoken-farewell path.
-This excludes phone/carrier delay. English phone acceptance and wider recognition/voice quality remain unverified for the new combination.
+The selected configuration uses `dialogue_model=meta-llama/llama-3.3-70b-instruct`,
+`dialogue_provider=groq`, and `reasoning_effort=null` through the existing OpenRouter account.
+It keeps Inworld TTS-2 with `inworld_voice=Wade` and `inworld_delivery_mode=CREATIVE`.
+The owner selected Wade from identical-text previews. The later Haiku 4.5 phone trial returned
+16 transcript turns, but the owner reported excessive delay before replies.
+
+A five-turn server replay measured a 1.932-second median with Haiku 4.5.
+Reply inference took 0.699–1.213 seconds; Wade synthesis took 0.179–0.191 seconds.
+After the model change and closing corrections, the same clean replay measured 1.186 seconds
+at the median and 1.249 seconds at the maximum. A replay with synthetic background noise
+measured 1.210 and 1.346 seconds respectively. These small samples measure speech end to
+server PCM; they exclude cellular and handset delay. The faster version still needs phone acceptance.
+
+A pinned provider has fallback disabled, so an unavailable route fails instead of silently
+using a different host. A null reasoning setting omits that API field for non-reasoning models.
+Runtime notices update one leading system instruction instead of accumulating in the history.
+Pipecat's latency observer logs stage durations without speech or credentials.
+
+The `finish_call` tool now queues its farewell through Pipecat's existing speech frame.
+The model must not speak that farewell separately. Hangup still requires completed playback
+and the full three-second reply window. An interruption cancels closing.
+Tests cover tool-only closing, duplicate requests, invalid farewells, and interrupted playback.
+The first fast-model replay exposed premature farewells; clearer tool instructions fixed both
+subsequent clean and noisy replays. Broader conversation quality remains an acceptance requirement.
 
 ## Deployment
 
@@ -125,8 +141,8 @@ Measure recognition, model, speech generation, and playback separately. Do not c
 
 ## Soniox and Inworld streaming route
 
-The selected next route uses Soniox STT RT v5, Inworld Realtime TTS-2 Flash, and the existing
-Gemini 3.1 Flash Lite dialogue model through OpenRouter. It reuses the pinned Pipecat adapters.
+The selected route uses Soniox STT RT v5, Inworld TTS-2 with Wade, and Llama 3.3 70B
+on Groq through OpenRouter. It reuses the pinned Pipecat adapters.
 Direct English and Spanish provider replays passed. Cellular timing and broad recognition accuracy still require testing.
 
 Merge these fields into the private configuration's `android` object:
@@ -137,8 +153,12 @@ Merge these fields into the private configuration's `android` object:
   "soniox_model": "stt-rt-v5",
   "soniox_turn_detection": "vad",
   "tts_transport": "inworld",
-  "inworld_model": "inworld-tts-2-flash",
-  "inworld_voice": "Ashley"
+  "inworld_model": "inworld-tts-2",
+  "inworld_voice": "Wade",
+  "inworld_delivery_mode": "CREATIVE",
+  "dialogue_model": "meta-llama/llama-3.3-70b-instruct",
+  "dialogue_provider": "groq",
+  "reasoning_effort": null
 }
 ```
 

@@ -3,6 +3,10 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
+import time
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import WebSocket
@@ -23,12 +27,16 @@ from app.android_voice import AndroidVoiceSession, VoiceCallbacks
 
 @pytest.mark.parametrize("language", ["en", "es"])
 @pytest.mark.parametrize("turn_detection", ["semantic", "vad"])
-@pytest.mark.parametrize("provider_error", [None, "soniox", "inworld", "interruption"])
+@pytest.mark.parametrize(
+    "provider_error", [None, "soniox", "inworld", "interruption", "finish", "finish_interruption"]
+)
 async def test_streaming_audio_transcripts_and_provider_failure(
-    packet, tmp_path, monkeypatch, language, turn_detection, provider_error
+    packet, tmp_path, monkeypatch, caplog, language, turn_detection, provider_error
 ):
     """Exercise the pinned adapters over real local sockets, without provider requests."""
     import app.android_voice as module
+
+    caplog.set_level(logging.INFO, logger="app.android_voice")
 
     input_received = asyncio.Event()
     finalize_allowed = asyncio.Event()
@@ -36,6 +44,8 @@ async def test_streaming_audio_transcripts_and_provider_failure(
     assistant_recorded = asyncio.Event()
     failed = asyncio.Event()
     model_done = asyncio.Event()
+    finished = asyncio.Event()
+    assistant_stopped_at = []
     interrupt_allowed = asyncio.Event()
     speech_canceled = asyncio.Event()
     media_flushed = asyncio.Queue()
@@ -76,7 +86,7 @@ async def test_streaming_audio_transcripts_and_provider_failure(
                     )
                 )
             break
-        if provider_error == "interruption":
+        if provider_error in {"interruption", "finish_interruption"}:
             await interrupt_allowed.wait()
             await ws.send(json.dumps({"tokens": [{"text": "Wait", "is_final": False}]}))
         await ws.wait_closed()
@@ -162,10 +172,20 @@ async def test_streaming_audio_transcripts_and_provider_failure(
         class LocalDialogue(module.OpenRouterVoiceLLMService):
             async def _process_context(self, context):
                 model_inputs.append(context.get_messages())
+                params = self.build_chat_completion_params({"messages": context.get_messages()})
+                assert params["extra_body"]["provider"]["only"] == ["groq"]
+                assert params["extra_body"]["provider"]["allow_fallbacks"] is False
+                assert "reasoning" not in params["extra_body"]
+                if provider_error in {"finish", "finish_interruption"}:
+                    await session._finish_call(
+                        SimpleNamespace(arguments={"farewell": reply}, result_callback=AsyncMock())
+                    )
+                    model_done.set()
+                    return
                 await self.push_frame(LLMTextFrame(reply))
                 # Require speech playback to begin before model completion.
                 await output_received.wait()
-                if provider_error == "interruption":
+                if provider_error in {"interruption", "finish_interruption"}:
                     await asyncio.Event().wait()
                 model_done.set()
 
@@ -180,16 +200,22 @@ async def test_streaming_audio_transcripts_and_provider_failure(
             if "FLUSH_MEDIA" in message.get("text", ""):
                 media_flushed.put_nowait(True)
             if message.get("bytes") and not output_received.is_set():
-                assert not model_done.is_set()
+                if provider_error not in {"finish", "finish_interruption"}:
+                    assert not model_done.is_set()
                 output_received.set()
 
         def record(*args):
             transcripts.append(args)
             if args[0] == "assistant":
                 assistant_recorded.set()
+                assistant_stopped_at.append(time.monotonic())
 
         async def finish(guard):
-            raise AssertionError("The dialogue did not request hangup")
+            assert provider_error == "finish"
+            assert assistant_stopped_at and guard()
+            assert time.monotonic() - assistant_stopped_at[-1] >= 2.9
+            finished.set()
+            return True
 
         websocket = WebSocket(
             {"type": "websocket", "path": "/phone-media", "headers": []}, incoming.get, send
@@ -211,6 +237,9 @@ async def test_streaming_audio_transcripts_and_provider_failure(
             inworld_model="inworld-tts-2",
             inworld_voice="Wade",
             inworld_delivery_mode="CREATIVE",
+            dialogue_model="meta-llama/llama-3.3-70b-instruct",
+            dialogue_provider="groq",
+            reasoning_effort=None,
         )
         session = AndroidVoiceSession(
             websocket,
@@ -259,14 +288,21 @@ async def test_streaming_audio_transcripts_and_provider_failure(
             if turn_detection == "vad":
                 await session._worker.queue_frame(VADUserStartedSpeakingFrame())
                 await session._worker.queue_frame(VADUserStoppedSpeakingFrame(stop_secs=0.3))
-            if provider_error == "interruption":
+            if provider_error in {"interruption", "finish_interruption"}:
                 await asyncio.wait_for(output_received.wait(), 5)
                 while not media_flushed.empty():
                     media_flushed.get_nowait()
-                session.closing.played("Goodbye.", interrupted=False)
-                session.closing.request("Goodbye.")
-                guard = session.closing.guard()
-                assert guard and guard()
+                if provider_error == "interruption":
+                    session.closing.request("Goodbye.")
+                    session.closing.played("Goodbye.", interrupted=False)
+                    guard = session.closing.guard()
+                    assert guard and guard()
+                else:
+                    assert session.closing.farewell is not None
+
+                    def guard():
+                        return session.closing.farewell is not None
+
                 interrupt_allowed.set()
                 if turn_detection == "vad":
                     await session._worker.queue_frame(VADUserStartedSpeakingFrame())
@@ -274,14 +310,28 @@ async def test_streaming_audio_transcripts_and_provider_failure(
                 await asyncio.wait_for(speech_canceled.wait(), 5)
                 assert not guard()
                 assert len(model_inputs) == 1
-                assert not model_done.is_set()
-                assert len(contexts) == 1
+                assert model_done.is_set() == (provider_error == "finish_interruption")
+                assert len(contexts) == (
+                    2 if provider_error in {"finish", "finish_interruption"} else 1
+                )
+                if turn_detection == "vad":
+                    timings = [
+                        json.loads(record.getMessage().removeprefix("voice_latency "))
+                        for record in caplog.records
+                        if record.getMessage().startswith("voice_latency ")
+                    ]
+                    assert timings and timings[0]["seconds"] >= 0
+                    assert timings[0]["call_id"] == "call_streaming"
+                    assert utterance not in json.dumps(timings)
+                    assert reply.strip() not in json.dumps(timings)
                 unheard_tail = "Anything else?" if language == "en" else "¿Algo más?"
                 assert all(
                     unheard_tail not in row[1] for row in transcripts if row[0] == "assistant"
                 )
                 assert not failed.is_set()
-            elif provider_error:
+                await asyncio.sleep(3.1)
+                assert not finished.is_set()
+            elif provider_error in {"soniox", "inworld"}:
                 await asyncio.wait_for(failed.wait(), 5)
                 assert not output_received.is_set()
             else:
@@ -296,7 +346,11 @@ async def test_streaming_audio_transcripts_and_provider_failure(
                 assert output_audio * len(spoken_texts) == b"".join(
                     item.get("bytes", b"") for item in outgoing
                 )
-                assert len(contexts) == 1
+                assert len(contexts) == (
+                    2 if provider_error in {"finish", "finish_interruption"} else 1
+                )
+                if provider_error == "finish":
+                    await asyncio.wait_for(finished.wait(), 5)
             if tts_configs:
                 assert tts_configs[0]["modelId"] == "inworld-tts-2"
                 assert tts_configs[0]["voiceId"] == "Wade"

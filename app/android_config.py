@@ -30,7 +30,8 @@ class AndroidConfig(BaseModel):
     soniox_endpoint_sensitivity: float = Field(default=0.3, ge=-1, le=1)
     stt_model: str = "deepgram/nova-3"
     dialogue_model: str = "google/gemini-3.1-flash-lite"
-    reasoning_effort: Literal["none", "minimal", "low", "medium", "high"] = "none"
+    dialogue_provider: str | None = Field(default=None, min_length=1)
+    reasoning_effort: Literal["none", "minimal", "low", "medium", "high"] | None = "none"
     tts_model: str = "elevenlabs/eleven-flash-v2.5"
     voice: str = "sarah"
     tts_transport: Literal["openrouter", "inworld"] = "openrouter"
