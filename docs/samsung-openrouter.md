@@ -85,7 +85,7 @@ Reply inference took 0.699–1.213 seconds; Wade synthesis took 0.179–0.191 se
 After the model change and closing corrections, the same clean replay measured 1.186 seconds
 at the median and 1.249 seconds at the maximum. A replay with synthetic background noise
 measured 1.210 and 1.346 seconds respectively. These small samples measure speech end to
-server PCM; they exclude cellular and handset delay. The faster version still needs phone acceptance.
+server PCM; they exclude cellular and handset delay. Subsequent phone evidence is recorded below; wider voice-quality acceptance remains open.
 
 A pinned provider has fallback disabled, so an unavailable route fails instead of silently
 using a different host. A null reasoning setting omits that API field for non-reasoning models.
@@ -120,7 +120,13 @@ The first faster phone trial produced six measured replies between 1.072 and 1.1
 The owner liked it, but a pipeline failure ended the call early. That version was rolled back before
 further work. Language-switch replays did not reproduce the error, so its cause remains unconfirmed.
 Structured error logs now record the processor, exception class, category, and HTTP status without
-speech, raw error messages, or credentials. The new language route still requires a clean phone trial.
+speech, raw error messages, or credentials.
+
+The new multilingual phone trial completed normally with 36 transcript turns and replies in all four languages.
+It ended after the owner requested it and handled a follow-up goodbye before hangup. Thirteen server measurements
+had a 1.210-second median, 1.878-second p90, and 2.967-second maximum. No pipeline error or extraction tokens
+were recorded, and the phone returned to idle. Hermes retrieved all 36 transcript records through its native MCP client.
+This single call does not establish broad reliability or voice-quality acceptance.
 The selected Qwen/Cerebras replay answered in all four languages and closed once in Ukrainian.
 Ordinary reply delays were 1.162–1.217 seconds at the server; the closing reply took 3.274 seconds.
 The five-turn median was 1.215 seconds. This small sample does not establish tail-latency acceptance.
@@ -163,7 +169,7 @@ This is a preliminary choice, not a full model evaluation. Provider and phone la
 1. Verify the authenticated MCP flow without dialing.
 2. Check Asterisk media and gateway registration without a cellular call.
 3. Call an owner-controlled recipient and test both hangup directions.
-4. Test English and Spanish, interruptions, and a reply after the farewell.
+4. Test all enabled languages, interruptions, and a reply after the farewell.
 5. Retrieve every transcript page and confirm no summary-model request.
 6. Test worker failure, USB reconnect, deadlines, and restart without duplicate dialing.
 
@@ -176,7 +182,7 @@ Measure recognition, model, speech generation, and playback separately. Do not c
 
 The selected route uses Soniox STT RT v5, Inworld TTS-2 with Wade, and Qwen3.8 27B
 on Cerebras through OpenRouter. It reuses the pinned Pipecat adapters.
-Direct English and Spanish provider replays passed. Cellular timing and broad recognition accuracy still require testing.
+Provider replays and one cellular trial exercised all four enabled languages. Wider recognition and voice quality still require testing.
 
 Merge these fields into the private configuration's `android` object:
 
@@ -224,7 +230,7 @@ without waiting for a complete model reply. Word timestamps keep the conversatio
 The three-second farewell reply window, destination policy, and selected SIM checks remain in force.
 
 Local tests cover both turn modes through real loopback WebSockets with simulated providers. They verify audio transmission before
-turn completion, speech output before model completion, English/Spanish transcripts, provider-error handling,
+turn completion, speech output before model completion, transcripts in all four languages, provider-error handling,
 missing-key refusal, interruption flushing, cancellation of pending hangup, and task cleanup.
 They make no external provider request and do not establish audible phone latency or provider accuracy.
 
