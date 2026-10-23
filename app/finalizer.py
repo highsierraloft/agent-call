@@ -75,7 +75,7 @@ class UnknownEvidenceError(ValueError):
 
 
 class Finalizer:
-    def __init__(self, settings: Settings, db: Database, openai: AsyncOpenAI):
+    def __init__(self, settings: Settings, db: Database, openai: AsyncOpenAI | None):
         self.settings = settings
         self.db = db
         self.openai = openai
@@ -131,6 +131,7 @@ class Finalizer:
             transcript = await self.db.get_transcript(call_id)
         call_status = self._call_status(call["state"])
         fatal_reasons = {
+            "android_",
             "sideband_error",
             "openai_fatal_error",
             "transcription_config_mismatch",
@@ -252,6 +253,8 @@ class Finalizer:
     async def _extract(
         self, call: dict[str, Any], plan: PlanRecord, transcript: list[Any]
     ) -> tuple[ExtractedCallResult, tuple[int, int]]:
+        if self.openai is None:
+            raise RuntimeError("Post-call extraction is unavailable for this backend")
         # Normalize (but do not case-fold) turn_ids so an extractor citation padded with
         # incidental whitespace still validates; a matching stripped id is canonicalized
         # back to the exact transcript turn_id before being persisted.

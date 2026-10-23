@@ -8,7 +8,7 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from pydantic import Field, ValidationError
 
-from app.call_state import CallService
+from app.call_control import CallControl
 from app.errors import ErrorCode, error_json
 from app.mcp_oauth.constants import MCP_OAUTH_SCOPE
 from app.models import (
@@ -33,7 +33,11 @@ CONTEXT_GUIDANCE = (
 
 
 def register_tools(
-    mcp: FastMCP, get_service: Callable[[], CallService], *, oauth: bool = False
+    mcp: FastMCP,
+    get_service: Callable[[], CallControl],
+    *,
+    oauth: bool = False,
+    android_backend: bool = False,
 ) -> None:
     auth_meta = (
         {"securitySchemes": [{"type": "oauth2", "scopes": [MCP_OAUTH_SCOPE]}]} if oauth else None
@@ -49,7 +53,11 @@ def register_tools(
         },
         meta=auth_meta,
         description=(
-            "Validate and store a call plan without dialing. "
+            "Prepare a call brief without dialing. Specify language=en or es and escalation.mode=end_call. "
+            "Collect missing facts from the owner before calling. Hermes interprets the returned transcript. "
+            + CONTEXT_GUIDANCE
+            if android_backend
+            else "Validate and store a call plan without dialing. "
             + CONTEXT_GUIDANCE
             + " Read the returned confirmation_summary to the owner and collect missing fields."
         ),
@@ -81,7 +89,13 @@ def register_tools(
         },
         meta=auth_meta,
         description=(
-            "Start only a valid, unexpired prepared plan after explicit owner confirmation. "
+            "Start the prepared call within the owner's explicit request and approved details. "
+            "Copy confirmation_summary exactly into confirmation_text. An explicit owner request to "
+            "call with these details is sufficient confirmation; do not ask the same permission twice. "
+            "Wait for terminal state, then retrieve every transcript page. There are no live owner "
+            "transfers or mid-call questions in this backend. " + CONTEXT_GUIDANCE
+            if android_backend
+            else "Start only a valid, unexpired prepared plan after explicit owner confirmation. "
             "Pass the confirmation text that was read back. Then IMMEDIATELY begin calling "
             "wait_for_call_event in a loop, calling it again right after every response, "
             "until the call reaches a terminal state; answer pending questions with "
@@ -181,7 +195,10 @@ def register_tools(
         },
         meta=auth_meta,
         description=(
-            "Long-poll for mid-call questions or terminal state after a sequence cursor. "
+            "Wait for terminal call state. Continue waiting after an idle timeout, then retrieve "
+            "get_call_result and every transcript page. This backend does not ask mid-call questions."
+            if android_backend
+            else "Long-poll for mid-call questions or terminal state after a sequence cursor. "
             "Returns immediately when events exist; on idle timeout returns an empty events list "
             "(never an error) — this is NOT a stopping condition. Re-enter with "
             "next_after_sequence immediately, in a loop, for as long as the call is "
@@ -244,7 +261,10 @@ def register_tools(
         },
         meta=auth_meta,
         description=(
-            "Submit the final answer to one pending mid-call question from the voice agent — "
+            "Compatibility tool; the Android backend has no mid-call questions. "
+            "Put required facts in the initial brief. Calling this tool returns unknown_question."
+            if android_backend
+            else "Submit the final answer to one pending mid-call question from the voice agent — "
             "the callee is waiting live on the phone. Begin retrieval immediately, but prioritize "
             "accuracy over speed within the remaining deadline. For owner-specific facts, search "
             "agent_memory and conversation history first, then relevant integrations such as "

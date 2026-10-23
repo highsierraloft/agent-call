@@ -5,9 +5,17 @@
 *
 
 !Dockerfile
+!Dockerfile.asterisk
+!Dockerfile.android
 !pyproject.toml
 !uv.lock
 !README.md
+!requirements-android.txt
+
+!deploy/
+deploy/**
+!deploy/asterisk/
+!deploy/asterisk/entrypoint.py
 
 !app/
 !app/**

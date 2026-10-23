@@ -128,6 +128,7 @@ class Settings(BaseSettings):
     )
 
     openai_api_key: SecretStr | None = None
+    call_backend: Literal["twilio_openai", "android_openrouter"] = "twilio_openai"
     openai_webhook_secret: SecretStr | None = None
     openai_project_id: str | None = None
     exa_api_key: SecretStr | None = None
@@ -390,8 +391,16 @@ class Settings(BaseSettings):
 
     def runtime_env_values(self) -> dict[str, object]:
         names: tuple[str, ...] = CORE_RUNTIME_ENV_NAMES
+        if self.call_backend == "android_openrouter":
+            names = (
+                "OWNER_PHONE_E164",
+                "ALLOWED_AGENT_USER_ID",
+                "MCP_BEARER_TOKEN",
+                "DEBUG_API_TOKEN",
+                "DEPLOY_GUARD_TOKEN",
+            )
         if self.mcp_oauth_enabled:
-            names = CORE_RUNTIME_ENV_NAMES + OAUTH_RUNTIME_ENV_NAMES
+            names = names + OAUTH_RUNTIME_ENV_NAMES
         return {name: getattr(self, name.lower()) for name in names}
 
     def require_runtime_configuration(self) -> None:

@@ -3,8 +3,8 @@
 # Agent Call
 
 This fork is adding a Samsung SIM and OpenRouter backend for a brief-in, transcript-out
-MCP workflow. Transcript-only results are implemented; the new telephone and voice
-backend is still in development. The existing live path described below requires
+MCP workflow. The backend and transcript-only results are implemented and undergoing
+phone validation. The existing upstream live path described below requires
 OpenAI and Twilio. See the [fork status and acceptance checks](docs/samsung-openrouter.md).
 
 [![CI](https://github.com/XiyaoWang0519/agent-call/actions/workflows/ci.yml/badge.svg)](https://github.com/XiyaoWang0519/agent-call/actions/workflows/ci.yml)

@@ -438,7 +438,8 @@ async def test_app_lifespan_aggregates_all_cleanup_failures(settings, monkeypatc
     monkeypatch.setattr("app.main.create_openai_client", lambda _: FailingCloseClient())
     monkeypatch.setattr("app.main.CallService", FailingStopService)
     monkeypatch.setattr(
-        "app.main.register_tools", lambda _mcp, get_service: service_getters.append(get_service)
+        "app.main.register_tools",
+        lambda _mcp, get_service, **_kwargs: service_getters.append(get_service),
     )
     application = create_app(settings)
 

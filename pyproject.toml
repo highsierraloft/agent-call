@@ -56,6 +56,12 @@ Documentation = "https://github.com/XiyaoWang0519/agent-call/blob/main/README.md
 Changelog = "https://github.com/XiyaoWang0519/agent-call/blob/main/CHANGELOG.md"
 Security = "https://github.com/XiyaoWang0519/agent-call/blob/main/SECURITY.md"
 
+[project.optional-dependencies]
+android = [
+    "pipecat-ai[openai]==1.13.0",
+    "pipecat-asterisk==0.1.4",
+]
+
 [dependency-groups]
 dev = [
     "mypy>=1.17.0",

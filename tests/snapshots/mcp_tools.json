@@ -189,6 +189,21 @@
               "maxItems": 100,
               "type": "array"
             },
+            "language": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "en",
+                    "es"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "objective": {
               "maxLength": 4000,
               "minLength": 1,
