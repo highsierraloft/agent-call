@@ -88,6 +88,11 @@
     "input_schema": {
       "additionalProperties": false,
       "properties": {
+        "after_sequence": {
+          "default": 0,
+          "minimum": 0,
+          "type": "integer"
+        },
         "call_id": {
           "type": "string"
         }

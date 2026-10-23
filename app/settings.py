@@ -162,6 +162,7 @@ class Settings(BaseSettings):
     openai_http_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
     openai_keepalive_expiry_seconds: float | None = Field(default=60.0, ge=5, le=300)
     openai_extraction_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+    post_call_extraction_enabled: bool = True
     extractor_model: str = "gpt-5.4-mini-2026-03-17"
     database_url: str = "sqlite:///./agent_call.db"
     public_base_url: str | None = None

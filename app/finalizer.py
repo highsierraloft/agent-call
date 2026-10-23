@@ -171,6 +171,18 @@ class Finalizer:
         # This transaction occurs before the external extraction request.
         await self.db.save_result_with_transcript(call_id, fallback, transcript)
 
+        if not self.settings.post_call_extraction_enabled:
+            result = fallback.model_copy(
+                update={
+                    "finalization_status": "succeeded",
+                    "result_source": "transcript_only",
+                    "outcome": "failed" if call_status == "failed" else "unknown",
+                    "summary": "Call status and transcript are available for the requesting agent.",
+                }
+            )
+            await self.db.save_result_with_transcript(call_id, result, transcript)
+            return result
+
         try:
             plan = PlanRecord.from_row(plan_row)
             extracted, (extractor_input_tokens, extractor_output_tokens) = await self._extract(

@@ -95,7 +95,7 @@ def test_mcp_tool_schemas_are_frozen() -> None:
 
 def test_tool_errors_carry_stable_codes_for_missing_calls() -> None:
     class MissingService:
-        async def get_result(self, call_id: str):
+        async def get_result(self, call_id: str, *, after_sequence: int = 0):
             raise LookupError(call_id)
 
         async def get_snapshot(self, call_id: str):

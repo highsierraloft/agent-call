@@ -42,9 +42,14 @@ The server exposes exactly seven MCP tools:
 | `get_phone_call` | Snapshot of call state |
 | `answer_call_question` | Feed an answer to the live agent |
 | `end_phone_call` | Manual stop button |
-| `get_call_result` | Deterministic final result + transcript |
+| `get_call_result` | Call result and transcript page; pass `next_transcript_cursor` as `after_sequence` until null |
 
 During a live call, `wait_for_call_event` is the canonical monitoring loop; once it reports a terminal state, call `get_call_result`. Agent push is optional and non-canonical — a push failure is logged and never changes call state.
+
+Set `POST_CALL_EXTRACTION_ENABLED=false` when the requesting assistant handles the
+summary. This skips the post-call model request and preserves the original transcript.
+`result_source=transcript_only` means the caller must assess task completion from that
+transcript; `call_status=completed` means only that the telephone call ended.
 
 ## Safety properties
 

@@ -195,7 +195,7 @@ class StoredCallResult(BaseModel):
         description="Telephony lifecycle status; completed means the call ended, not task success."
     )
     finalization_status: Literal["succeeded", "failed", "telephony_only"] = Field(
-        description="Result extraction status; succeeded does not mean the call objective succeeded."
+        description="Result persistence/extraction status; succeeded does not mean the call objective succeeded."
     )
     outcome: Literal[
         "completed",
@@ -214,7 +214,11 @@ class StoredCallResult(BaseModel):
         )
     )
     result_source: Literal[
-        "realtime_tool", "post_call_extractor", "telephony_only", "extraction_failed"
+        "realtime_tool",
+        "post_call_extractor",
+        "telephony_only",
+        "extraction_failed",
+        "transcript_only",
     ]
     summary: str
     commitments: list[Commitment] = Field(default_factory=list)

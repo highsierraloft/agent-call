@@ -3407,9 +3407,12 @@ class CallService:
             cost=compute_call_cost(call, self.settings),
         )
 
-    async def get_result(self, call_id: str) -> dict[str, Any]:
+    async def get_result(self, call_id: str, *, after_sequence: int = 0) -> dict[str, Any]:
+        if after_sequence < 0:
+            raise ValueError("after_sequence must be non-negative")
         snapshot = await self.get_snapshot(call_id)
         cost = snapshot.cost
+        result = None
         if snapshot.state in TERMINAL_STATES:
             result = snapshot.result
             if result is None or result.finalization_status == "telephony_only":
@@ -3419,17 +3422,16 @@ class CallService:
                 call = await self.db.get_call(call_id)
                 if call is not None:
                     cost = compute_call_cost(call, self.settings)
-            return {
-                "call_id": call_id,
-                "state": snapshot.state,
-                "result": result.model_dump(mode="json"),
-                "cost": cost.model_dump(mode="json") if cost else None,
-            }
+        turns = await self.db.get_transcript_page(call_id, after_sequence=after_sequence, limit=101)
+        page = turns[:100]
         return {
             "call_id": call_id,
             "state": snapshot.state,
-            "result": None,
+            "result": result.model_dump(mode="json") if result else None,
             "cost": cost.model_dump(mode="json") if cost else None,
+            "transcript": [turn.model_dump(mode="json") for turn in page],
+            "next_transcript_cursor": page[-1].sequence_number if len(turns) > 100 else None,
+            "transcript_is_call_content": True,
         }
 
     # -- Transport-facing delegators -----------------------------------------

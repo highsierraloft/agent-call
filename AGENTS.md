@@ -1,5 +1,14 @@
 # Repository Guidelines
 
+## Fork scope
+
+This fork adds a Samsung SIM and OpenRouter route for a private Hermes deployment.
+Keep the existing MCP contract and persistence where practical. The requesting agent
+interprets the transcript; the deployment disables post-call model extraction.
+Keep documentation aligned with behavior and distinguish simulated transport checks
+from real phone tests. Never copy local credentials, transcripts, or host access records
+into this repository. The upstream Fly deployment is outside this fork's scope.
+
 ## Project Structure & Module Organization
 
 `app/` contains the Python service. `main.py` assembles FastAPI and FastMCP; `routes/` handles OpenAI, Twilio, debug, and deployment callbacks through explicit `CallService` methods (routes never touch `service.db` directly); `call_state.py` (the `CallService` facade and call state machine), `call_activity.py` (liveness/heartbeat tracking), `owner_transfer.py` (the owner-transfer saga), `twilio_bridge.py`, and `openai_live.py` coordinate live calls; and the `db/` package (a `Database` facade composed from per-concern modules: engine, plans, deployment, calls, transfers, termination, telemetry, webhooks, transcripts, questions), `models.py`, `policy.py`, and `security.py` own persistence, schemas, call policy, and authentication. Tests mirror these concerns in `tests/test_*.py`, with shared fixtures in `tests/conftest.py`. Operational files live at the repository root (`Dockerfile`, `fly.toml`, `render.yaml`), while `scripts/run_sip_canary.py` performs live end-to-end validation and `scripts/live_smoke.sh` boots the app with dummy credentials for a local MCP smoke test.
