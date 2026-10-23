@@ -47,7 +47,9 @@ The media simulation checks connection setup, buffering, shutdown, and task clea
 These checks do not prove cellular audio or acceptable conversation timing.
 One owner-controlled outbound call completed with seven transcript turns and confirmed hangup.
 The owner reported clear audio, long pauses, and a repeated introduction. The timing changes and
-introduction fix still need another real call. Full unattended recovery remains unverified.
+introduction fix were followed by a streaming call that completed with three transcript turns and agent-requested hangup.
+That call did not repeat the introduction, and the phone returned to idle. Its audible timing and interruption feedback remain pending.
+Full unattended recovery remains unverified.
 
 ## Deployment
 
