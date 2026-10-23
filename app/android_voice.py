@@ -290,6 +290,7 @@ class AndroidVoiceSession:
                 settings=InworldTTSService.Settings(
                     model=config.inworld_model,
                     voice=config.inworld_voice,
+                    delivery_mode=config.inworld_delivery_mode,
                     language=Language.EN_US if packet.language == "en" else Language.ES_ES,
                 ),
             )

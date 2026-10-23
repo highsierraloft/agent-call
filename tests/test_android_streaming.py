@@ -208,6 +208,9 @@ async def test_streaming_audio_transcripts_and_provider_failure(
             soniox_turn_detection=turn_detection,
             tts_transport="inworld",
             inworld_key_file=inworld_key,
+            inworld_model="inworld-tts-2",
+            inworld_voice="Wade",
+            inworld_delivery_mode="CREATIVE",
         )
         session = AndroidVoiceSession(
             websocket,
@@ -295,7 +298,9 @@ async def test_streaming_audio_transcripts_and_provider_failure(
                 )
                 assert len(contexts) == 1
             if tts_configs:
-                assert tts_configs[0]["modelId"] == "inworld-tts-2-flash"
+                assert tts_configs[0]["modelId"] == "inworld-tts-2"
+                assert tts_configs[0]["voiceId"] == "Wade"
+                assert tts_configs[0]["deliveryMode"] == "CREATIVE"
                 assert tts_configs[0]["audioConfig"] == {
                     "audioEncoding": "PCM",
                     "sampleRateHertz": 8000,

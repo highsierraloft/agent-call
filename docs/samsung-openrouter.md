@@ -42,7 +42,7 @@ The Android path has no owner transfer, mid-call question tool, answering-machin
 or in-call web search. If a required fact is missing, the voice agent ends politely.
 These features remain available in the separate upstream backend where documented.
 
-The latest local suite passed 796 tests with two skips and 88.24% coverage.
+The latest local suite passed 796 tests with two skips and 88.22% coverage.
 The media simulation checks connection setup, buffering, shutdown, and task cleanup without model requests.
 These checks do not prove cellular audio or acceptable conversation timing.
 One owner-controlled outbound call completed with seven transcript turns and confirmed hangup.
@@ -67,10 +67,20 @@ The separate three-second reply window and interruption handling remain in place
 The hard cap includes connection setup, so a conversation can be shorter than the configured maximum.
 
 The owner-authorized longer trial uses `inworld_model=inworld-tts-2` for more expressive speech,
-with the same Ashley voice and a 180-second cap. Flash remains the lower-cost configuration default.
+with a 180-second cap. Flash remains the lower-cost configuration default.
 One direct provider replay with the updated prompt and TTS-2 measured 1.72 seconds to server PCM.
-This is slower than the earlier Flash samples; actual phone quality and timing still require the owner trial.
+The longer phone test returned 23 transcript turns and ended when the owner asked to stop.
+The owner found it better but still robotic in wording and voice. Quality acceptance remains open.
 Live text-model probes covered the opening, relevant follow-ups, a request to stay, truthful identity, and closing.
+
+The next selected configuration uses `dialogue_model=anthropic/claude-haiku-4.5`, reasoning `none`,
+and Inworld TTS-2 with `inworld_voice=Wade` and `inworld_delivery_mode=CREATIVE`.
+The owner selected Wade from three identical-text audio previews. The delivery mode uses the existing Pipecat setting.
+Small model comparisons favored Haiku 4.5's shorter replies for this trial; they are not a general model ranking.
+The newer Haiku 5.5 was also evaluated. Its low-verbosity configuration produced a closing tool call without spoken text in one sample.
+Gemini 3.8 Flash with minimal reasoning added more delay in these samples.
+A full server replay of the selected combination took 1.65 seconds to PCM and completed the spoken-farewell path.
+This excludes phone/carrier delay. English phone acceptance and wider recognition/voice quality remain unverified for the new combination.
 
 ## Deployment
 

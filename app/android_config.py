@@ -37,6 +37,7 @@ class AndroidConfig(BaseModel):
     inworld_key_file: Path = Path("/run/secrets/inworld-api-key")
     inworld_model: str = "inworld-tts-2-flash"
     inworld_voice: str = "Ashley"
+    inworld_delivery_mode: Literal["STABLE", "BALANCED", "CREATIVE"] | None = None
 
     @staticmethod
     def _provider_key(path: Path, provider: str) -> SecretStr:
