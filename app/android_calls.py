@@ -64,6 +64,7 @@ class AndroidCallService:
     ) -> None:
         if settings.post_call_extraction_enabled:
             raise ValueError("The Android backend requires transcript-only finalization")
+        config.validate_voice_credentials()
         self.settings, self.db, self.config = settings, db, config
         self.asterisk, self.phone, self._api_key = asterisk, phone, api_key
         self.finalizer = Finalizer(settings, db, None)
@@ -447,7 +448,7 @@ class AndroidCallService:
             "state": snapshot.state,
             "result": result.model_dump(mode="json") if result else None,
             "cost": None,
-            "cost_note": "Carrier and OpenRouter usage are not reconciled here.",
+            "cost_note": "Carrier and voice-provider usage are not reconciled here.",
             "transcript": [turn.model_dump(mode="json") for turn in turns[:100]],
             "next_transcript_cursor": turns[99].sequence_number if len(turns) > 100 else None,
             "transcript_is_call_content": True,

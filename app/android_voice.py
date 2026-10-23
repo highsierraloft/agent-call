@@ -31,10 +31,16 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
+from pipecat.services.inworld.tts import InworldTTSService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.stt import OpenAISTTService
+from pipecat.services.stt_service import STTService
+from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
 from pipecat_asterisk import AsteriskFrameSerializer, AsteriskWebsocketTransport
 
@@ -42,6 +48,7 @@ from app.android_config import AndroidConfig
 from app.models import ContextPacket
 from app.openrouter_client import OpenRouterVoiceLLMService
 from app.openrouter_tts import OPENROUTER_API_URL, OpenRouterTTSService
+from app.soniox_client import SonioxVoiceSTTService as SonioxSTTService
 
 
 def voice_instructions(packet: ContextPacket) -> str:
@@ -146,6 +153,7 @@ class AndroidVoiceSession:
     ) -> None:
         if packet.language not in {"en", "es"}:
             raise ValueError("The call language must be specified")
+        config.validate_voice_credentials()
         # Call text belongs in the private transcript store, not dependency debug logs.
         pipecat_logger.disable("pipecat")
         pipecat_logger.disable("pipecat_asterisk")
@@ -168,16 +176,66 @@ class AndroidVoiceSession:
             ),
         )
         self._transport = transport
-        stt = OpenAISTTService(
-            api_key=api_key,
-            base_url=OPENROUTER_API_URL,
-            http_client=self._stt_http,
-            sample_rate=8000,
-            include_prob_metrics=False,
-            settings=OpenAISTTService.Settings(
-                model=config.stt_model, language=Language(packet.language)
-            ),
-        )
+        stt: STTService
+        if config.stt_transport == "deepgram_flux":
+            flux = DeepgramFluxSTTService(
+                api_key=config.deepgram_key().get_secret_value(),
+                sample_rate=8000,
+                enable_eager_end_of_turn=True,
+                settings=DeepgramFluxSTTService.Settings(
+                    model="flux-general-multi",
+                    language_hints=[Language(packet.language)],
+                    eager_eot_threshold=0.5,
+                    eot_threshold=0.7,
+                ),
+            )
+            stt = flux
+            user_params = LLMUserAggregatorParams(
+                user_turn_strategies=flux.recommended_user_turn_strategies(
+                    enable_interruptions=True
+                )
+            )
+        elif config.stt_transport == "soniox":
+            semantic = config.soniox_turn_detection == "semantic"
+            stt = SonioxSTTService(
+                api_key=config.soniox_key().get_secret_value(),
+                sample_rate=8000,
+                vad_force_turn_endpoint=not semantic,
+                settings=SonioxSTTService.Settings(
+                    model=config.soniox_model,
+                    language_hints=[Language(packet.language)],
+                    max_endpoint_delay_ms=config.soniox_endpoint_delay_ms if semantic else None,
+                    endpoint_latency_adjustment_level=config.soniox_endpoint_latency_level
+                    if semantic
+                    else None,
+                    endpoint_sensitivity=config.soniox_endpoint_sensitivity if semantic else None,
+                ),
+            )
+            if semantic:
+                # The service's metadata selects Pipecat's external turn strategies.
+                user_params = LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer())
+            else:
+                # Finalize the live stream after a short silence, then wait for final text.
+                user_params = LLMUserAggregatorParams(
+                    vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.3)),
+                    user_turn_strategies=UserTurnStrategies(
+                        stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=0.0)]
+                    ),
+                )
+        else:
+            stt = OpenAISTTService(
+                api_key=api_key,
+                base_url=OPENROUTER_API_URL,
+                http_client=self._stt_http,
+                sample_rate=8000,
+                include_prob_metrics=False,
+                settings=OpenAISTTService.Settings(
+                    model=config.stt_model, language=Language(packet.language)
+                ),
+            )
+            user_params = LLMUserAggregatorParams(
+                vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.3)),
+            )
         llm = OpenRouterVoiceLLMService(
             api_key=api_key,
             http_client=self._llm_http,
@@ -190,7 +248,22 @@ class AndroidVoiceSession:
                 ),
             ),
         )
-        tts = OpenRouterTTSService(api_key=api_key, model=config.tts_model, voice=config.voice)
+        tts: TTSService
+        if config.tts_transport == "inworld":
+            tts = InworldTTSService(
+                api_key=config.inworld_key().get_secret_value(),
+                sample_rate=8000,
+                encoding="PCM",
+                auto_mode=True,
+                timestamp_transport_strategy="ASYNC",
+                settings=InworldTTSService.Settings(
+                    model=config.inworld_model,
+                    voice=config.inworld_voice,
+                    language=Language.EN_US if packet.language == "en" else Language.ES_ES,
+                ),
+            )
+        else:
+            tts = OpenRouterTTSService(api_key=api_key, model=config.tts_model, voice=config.voice)
         tools = ToolsSchema(
             standard_tools=[
                 FunctionSchema(
@@ -209,12 +282,7 @@ class AndroidVoiceSession:
         context = LLMContext(
             messages=[{"role": "system", "content": voice_instructions(packet)}], tools=tools
         )
-        aggregators = LLMContextAggregatorPair(
-            context,
-            user_params=LLMUserAggregatorParams(
-                vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.3)),
-            ),
-        )
+        aggregators = LLMContextAggregatorPair(context, user_params=user_params)
         self._worker = PipelineWorker(
             Pipeline(
                 [

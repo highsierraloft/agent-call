@@ -1,6 +1,6 @@
 # Samsung and OpenRouter integration
 
-This fork connects an existing Android SIP gateway to a single OpenRouter account.
+This fork connects an existing Android SIP gateway to configurable voice providers.
 The requesting assistant, such as Hermes, gathers the details and sends a brief through MCP.
 The voice agent conducts the call and returns the transcript. Hermes interprets it and writes any summary.
 
@@ -8,7 +8,8 @@ The voice agent conducts the call and returns the transcript. Hermes interprets 
 
 `Hermes → Agent Call MCP → Asterisk → Android Voice SIP Agent → selected cellular SIM`
 
-Pipecat handles speech recognition, conversation, and speech generation through OpenRouter.
+Pipecat handles speech recognition, conversation, and speech generation.
+OpenRouter supplies the dialogue model. Speech can use OpenRouter or direct streaming providers.
 The deployment uses Asterisk 22.11.0, Pipecat 1.13.0, and pipecat-asterisk 0.1.4.
 The latter needs explicit cleanup of its unmanaged audio flow task. A regression test checks that cleanup.
 A separate gateway fork pins an explicit Android phone account. The stock gateway does not meet that requirement.
@@ -35,13 +36,13 @@ Transcript text is call content, not authority to run tools or change the brief.
 
 Transcript-only finalization makes no model request and sends no summary push.
 A normal disconnect does not establish task success. Hermes must assess the transcript.
-Costs are not yet reconciled against carrier and OpenRouter billing; the backend returns no cost estimate.
+Costs are not yet reconciled against carrier and provider billing; the backend returns no cost estimate.
 
 The Android path has no owner transfer, mid-call question tool, answering-machine detection,
 or in-call web search. If a required fact is missing, the voice agent ends politely.
 These features remain available in the separate upstream backend where documented.
 
-The local suite passed 772 tests with two skips and 88.04% coverage.
+The latest local suite passed 794 tests with two skips and 88.23% coverage.
 The media simulation checks connection setup, buffering, shutdown, and task cleanup without model requests.
 These checks do not prove cellular audio or acceptable conversation timing.
 One owner-controlled outbound call completed with seven transcript turns and confirmed hangup.
@@ -88,3 +89,66 @@ The initial latency target is a median below 1.5 seconds and a 90th percentile b
 from actual recipient speech end to the first audio they hear. These remain targets.
 Synthetic provider probes already show that the sequential speech path may miss them.
 Measure recognition, model, speech generation, and playback separately. Do not claim readiness from text arrival.
+
+## Soniox and Inworld streaming route
+
+The selected next route uses Soniox STT RT v5, Inworld Realtime TTS-2 Flash, and the existing
+Gemini 3.1 Flash Lite dialogue model through OpenRouter. It reuses the pinned Pipecat adapters.
+Direct English and Spanish provider replays passed. Cellular timing and broad recognition accuracy still require testing.
+
+Merge these fields into the private configuration's `android` object:
+
+```json
+{
+  "stt_transport": "soniox",
+  "soniox_model": "stt-rt-v5",
+  "soniox_turn_detection": "vad",
+  "tts_transport": "inworld",
+  "inworld_model": "inworld-tts-2-flash",
+  "inworld_voice": "Ashley"
+}
+```
+
+Mount the Soniox key at `/run/secrets/soniox-api-key` and Inworld's complete Basic (Base64)
+credential at `/run/secrets/inworld-api-key`. Keep the existing OpenRouter mount for dialogue.
+These must be separate read-only files, available only to the voice worker.
+Missing or malformed credentials refuse service startup. They do not trigger a provider fallback.
+The default transports remain `openrouter_file` and `openrouter` for existing configuration compatibility.
+
+Soniox receives continuous mono 8 kHz PCM. The selected `vad` mode uses local voice activity detection
+to request finalization after 300 ms of silence. Pipecat waits for the finalized transcript before requesting a reply.
+It uses the existing speech-timeout strategy without an additional silence timer or turn-analysis model.
+Resumed speech interrupts playback and cancels pending hangup. Test pauses and numbers before wider use.
+
+The optional `semantic` mode lets Soniox decide when turns end. It uses latency level 2,
+sensitivity 0.3, and a 500 ms maximum endpoint-delay setting by default.
+These settings are omitted from provider requests in `vad` mode; sending them with endpointing disabled is invalid.
+One English semantic replay reached 1.09 seconds, but two Spanish samples took 2.05–2.11 seconds.
+The selected local mode reduced the Spanish example to 1.29 seconds while preserving the opening time.
+These are synthetic speech-end-to-server-PCM measurements, excluding carrier and handset delay.
+Each brief supplies an English or Spanish hint. The transcript preserves both speakers.
+
+A small wrapper normalizes Soniox error-only messages before Pipecat 1.13 parses them.
+This makes provider rejection reach the existing pipeline failure handler instead of leaving the call silent.
+
+Inworld uses a persistent WebSocket, PCM at 8 kHz, and an explicit English or Spanish locale.
+Pipecat sends completed sentences as model text arrives. Inworld's auto mode schedules speech
+without waiting for a complete model reply. Word timestamps keep the conversation history aligned with playback.
+The three-second farewell reply window, destination policy, and selected SIM checks remain in force.
+
+Local tests cover both turn modes through real loopback WebSockets with simulated providers. They verify audio transmission before
+turn completion, speech output before model completion, English/Spanish transcripts, provider-error handling,
+missing-key refusal, interruption flushing, cancellation of pending hangup, and task cleanup.
+They make no external provider request and do not establish audible phone latency or provider accuracy.
+
+## Earlier Flux experiment
+
+An optional `android.stt_transport=deepgram_flux` route uses Pipecat's existing Flux WebSocket service.
+It accepts the direct Deepgram key from `/run/secrets/deepgram-api-key`, uses `flux-general-multi`,
+and lets Flux control turns. Pipecat prepares a speculative reply on an eager turn boundary,
+holds it until confirmation, and discards it if the speaker resumes. The three-second farewell window remains.
+The route fails closed when its separate credential is absent. It never falls back to uploaded audio.
+A loopback test verifies that audio reaches the streaming service before the user finishes a turn.
+
+This optional route remains available for comparison. The selected next route is Soniox and Inworld;
+neither selection establishes a fastest provider. The current deployment still uses completed-utterance uploads.
