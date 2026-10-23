@@ -72,7 +72,9 @@ async def test_finish_tool_speaks_once_and_cannot_reuse_old_playback():
     session.closing.played("Goodbye.", interrupted=False)
     session._worker = SimpleNamespace(queue_frame=AsyncMock())
     result = AsyncMock()
-    params = SimpleNamespace(arguments={"farewell": "Goodbye."}, result_callback=result)
+    params = SimpleNamespace(
+        arguments={"farewell": "Goodbye."}, result_callback=result, llm=SimpleNamespace()
+    )
     await session._finish_call(params)
     await session._finish_call(params)
     session._worker.queue_frame.assert_awaited_once()
@@ -92,8 +94,27 @@ async def test_invalid_farewell_never_speaks_or_closes(farewell):
     session._worker = SimpleNamespace(queue_frame=AsyncMock())
     result = AsyncMock()
     await session._finish_call(
-        SimpleNamespace(arguments={"farewell": farewell}, result_callback=result)
+        SimpleNamespace(
+            arguments={"farewell": farewell}, result_callback=result, llm=SimpleNamespace()
+        )
     )
     session._worker.queue_frame.assert_not_awaited()
     assert session.closing.farewell is None
     assert not result.call_args.args[0]["closing_requested"]
+
+
+async def test_already_played_farewell_reuses_only_the_current_model_response():
+    session = AndroidVoiceSession.__new__(AndroidVoiceSession)
+    session.closing = ClosingWindow()
+    session.closing.played("Thanks. Goodbye.", interrupted=False)
+    session._played_response_serial = 3
+    session._worker = SimpleNamespace(queue_frame=AsyncMock())
+    session._schedule_closing = lambda: None
+    llm = SimpleNamespace(generated_response_text="Thanks. Goodbye.", response_serial=3)
+    await session._finish_call(
+        SimpleNamespace(arguments={"farewell": "Goodbye."}, result_callback=AsyncMock(), llm=llm)
+    )
+    session._worker.queue_frame.assert_not_awaited()
+    assert session.closing.guard()()
+    session.closing.user_started()
+    assert session.closing.guard() is None

@@ -20,6 +20,9 @@ class AndroidConfig(BaseModel):
     caller_number: str = Field(pattern=r"^\+[1-9][0-9]{7,14}$")
     allowed_destinations: list[str] = Field(min_length=1, max_length=20)
     max_call_seconds: int = Field(default=90, ge=30, le=600)
+    conversation_languages: list[Literal["en", "es", "ru", "uk"]] = Field(
+        default=["en", "es"], min_length=1, max_length=4
+    )
     stt_transport: Literal["openrouter_file", "deepgram_flux", "soniox"] = "openrouter_file"
     deepgram_key_file: Path = Path("/run/secrets/deepgram-api-key")
     soniox_key_file: Path = Path("/run/secrets/soniox-api-key")

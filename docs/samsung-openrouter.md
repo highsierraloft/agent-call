@@ -42,7 +42,7 @@ The Android path has no owner transfer, mid-call question tool, answering-machin
 or in-call web search. If a required fact is missing, the voice agent ends politely.
 These features remain available in the separate upstream backend where documented.
 
-The latest local suite passed 810 tests with two skips and 88.43% coverage.
+The latest local suite passed 847 tests with two skips and 88.48% coverage.
 The media simulation checks connection setup, buffering, shutdown, and task cleanup without model requests.
 These checks do not prove cellular audio or acceptable conversation timing.
 One owner-controlled outbound call completed with seven transcript turns and confirmed hangup.
@@ -73,8 +73,9 @@ The longer phone test returned 23 transcript turns and ended when the owner aske
 The owner found it better but still robotic in wording and voice. Quality acceptance remains open.
 Live text-model probes covered the opening, relevant follow-ups, a request to stay, truthful identity, and closing.
 
-The selected configuration uses `dialogue_model=meta-llama/llama-3.3-70b-instruct`,
-`dialogue_provider=groq`, and `reasoning_effort=null` through the existing OpenRouter account.
+The multilingual trial selects `dialogue_model=qwen/qwen3.8-27b`,
+`dialogue_provider=cerebras`, and `reasoning_effort=none` through the existing OpenRouter account.
+Dialogue temperature is 0.4. The earlier English trial used Llama 3.3 70B on Groq.
 It keeps Inworld TTS-2 with `inworld_voice=Wade` and `inworld_delivery_mode=CREATIVE`.
 The owner selected Wade from identical-text previews. The later Haiku 4.5 phone trial returned
 16 transcript turns, but the owner reported excessive delay before replies.
@@ -92,11 +93,43 @@ Runtime notices update one leading system instruction instead of accumulating in
 Pipecat's latency observer logs stage durations without speech or credentials.
 
 The `finish_call` tool now queues its farewell through Pipecat's existing speech frame.
-The model must not speak that farewell separately. Hangup still requires completed playback
+The model must not speak that farewell separately. If it already generated the same farewell in
+the current response, the tool waits for that playback instead of queuing it again. Reply tracking
+resets with each model response, so an older farewell cannot satisfy the guard. Hangup requires completed playback
 and the full three-second reply window. An interruption cancels closing.
 Tests cover tool-only closing, duplicate requests, invalid farewells, and interrupted playback.
 The first fast-model replay exposed premature farewells; clearer tool instructions fixed both
 subsequent clean and noisy replays. Broader conversation quality remains an acceptance requirement.
+
+## Language switching and caller instructions
+
+The `language` field selects the initial language: `en`, `es`, `ru`, or `uk`.
+The deployment's `conversation_languages` list controls which languages may be used during a call.
+Its default remains English and Spanish; the owner trial enables all four.
+Soniox receives all enabled languages as hints. Inworld detects each reply's language from its text,
+instead of forcing an English or Spanish locale. Short numeric answers use words in the current language.
+The opening connection cue is internal context and is not added to the recipient transcript.
+
+A language request can change the conversation language, but cannot change the approved task or authority.
+Instructions reject requests to disclose hidden prompts, invent authorization, or bypass the brief.
+The model receives no provider credentials and has only the closing tool. SIM selection, destination
+admission, deadlines, and access control remain enforced outside the model.
+Sample injection probes passed in all four languages; these examples do not prove universal resistance.
+
+The first faster phone trial produced six measured replies between 1.072 and 1.186 seconds at the server.
+The owner liked it, but a pipeline failure ended the call early. That version was rolled back before
+further work. Language-switch replays did not reproduce the error, so its cause remains unconfirmed.
+Structured error logs now record the processor, exception class, category, and HTTP status without
+speech, raw error messages, or credentials. The new language route still requires a clean phone trial.
+The selected Qwen/Cerebras replay answered in all four languages and closed once in Ukrainian.
+Ordinary reply delays were 1.162–1.217 seconds at the server; the closing reply took 3.274 seconds.
+The five-turn median was 1.215 seconds. This small sample does not establish tail-latency acceptance.
+An internal connection cue supplies the initial user message required by the Cerebras chat template.
+
+Inworld lists English, Spanish, and Russian in its highest-evaluated tier, with Ukrainian in its
+supported second tier. Check the chosen voice with a native speaker before wider use.
+See [Inworld language support](https://docs.inworld.ai/tts/capabilities/multilingual) and
+[Soniox language detection](https://soniox.com/speech-to-text/features/language-detection).
 
 ## Deployment
 
@@ -141,14 +174,15 @@ Measure recognition, model, speech generation, and playback separately. Do not c
 
 ## Soniox and Inworld streaming route
 
-The selected route uses Soniox STT RT v5, Inworld TTS-2 with Wade, and Llama 3.3 70B
-on Groq through OpenRouter. It reuses the pinned Pipecat adapters.
+The selected route uses Soniox STT RT v5, Inworld TTS-2 with Wade, and Qwen3.8 27B
+on Cerebras through OpenRouter. It reuses the pinned Pipecat adapters.
 Direct English and Spanish provider replays passed. Cellular timing and broad recognition accuracy still require testing.
 
 Merge these fields into the private configuration's `android` object:
 
 ```json
 {
+  "conversation_languages": ["en", "es", "ru", "uk"],
   "stt_transport": "soniox",
   "soniox_model": "stt-rt-v5",
   "soniox_turn_detection": "vad",
@@ -156,9 +190,9 @@ Merge these fields into the private configuration's `android` object:
   "inworld_model": "inworld-tts-2",
   "inworld_voice": "Wade",
   "inworld_delivery_mode": "CREATIVE",
-  "dialogue_model": "meta-llama/llama-3.3-70b-instruct",
-  "dialogue_provider": "groq",
-  "reasoning_effort": null
+  "dialogue_model": "qwen/qwen3.8-27b",
+  "dialogue_provider": "cerebras",
+  "reasoning_effort": "none"
 }
 ```
 
@@ -179,12 +213,12 @@ These settings are omitted from provider requests in `vad` mode; sending them wi
 One English semantic replay reached 1.09 seconds, but two Spanish samples took 2.05–2.11 seconds.
 The selected local mode reduced the Spanish example to 1.29 seconds while preserving the opening time.
 These are synthetic speech-end-to-server-PCM measurements, excluding carrier and handset delay.
-Each brief supplies an English or Spanish hint. The transcript preserves both speakers.
+The deployment supplies the enabled language hints. The transcript preserves both speakers and their original language.
 
 A small wrapper normalizes Soniox error-only messages before Pipecat 1.13 parses them.
 This makes provider rejection reach the existing pipeline failure handler instead of leaving the call silent.
 
-Inworld uses a persistent WebSocket, PCM at 8 kHz, and an explicit English or Spanish locale.
+Inworld uses a persistent WebSocket, PCM at 8 kHz, and automatic output-language detection.
 Pipecat sends completed sentences as model text arrives. Inworld's auto mode schedules speech
 without waiting for a complete model reply. Word timestamps keep the conversation history aligned with playback.
 The three-second farewell reply window, destination policy, and selected SIM checks remain in force.

@@ -369,3 +369,15 @@ async def test_owned_media_must_enter_asterisk_application_before_dial(android):
     )
     await wait_until(lambda: bool(h.asterisk.dials))
     assert len(h.asterisk.dials) == 1
+
+
+@pytest.mark.parametrize("language", ["ru", "uk"])
+async def test_start_requires_initial_language_in_deployment_allowlist(android, language):
+    h = android
+    h.packet.language = language
+    with pytest.raises(CallRefusal, match="language_required"):
+        await start(h)
+    assert not h.asterisk.dials
+    h.service.config.conversation_languages = ["en", "es", "ru", "uk"]
+    started = await start(h)
+    assert started.state == CallState.PREWARMING

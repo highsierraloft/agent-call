@@ -6,10 +6,26 @@ from collections.abc import Mapping
 from typing import Any
 
 from openai import AsyncOpenAI
+from pipecat.frames.frames import Frame, LLMFullResponseStartFrame, LLMTextFrame
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openrouter.llm import OpenRouterLLMService
 
 
 class OpenRouterVoiceLLMService(OpenRouterLLMService):
+    generated_response_text = ""
+    response_serial = 0
+
+    async def push_frame(
+        self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
+    ) -> None:
+        if direction == FrameDirection.DOWNSTREAM:
+            if isinstance(frame, LLMFullResponseStartFrame):
+                self.generated_response_text = ""
+                self.response_serial += 1
+            elif isinstance(frame, LLMTextFrame):
+                self.generated_response_text += frame.text
+        await super().push_frame(frame, direction)
+
     def create_client(
         self,
         api_key: str | None = None,

@@ -122,8 +122,8 @@ class AndroidCallService:
             if plan is None:
                 raise CallRefusal(ErrorCode.PLAN_NOT_FOUND)
             self._validate_packet(plan.context)
-            if plan.context.language not in {"en", "es"}:
-                raise CallRefusal("language_required", "Specify the call language")
+            if plan.context.language not in self.config.conversation_languages:
+                raise CallRefusal("language_required", "Specify an enabled initial call language")
             try:
                 registered = await self.asterisk.gateway_registered()
             except AsteriskError:

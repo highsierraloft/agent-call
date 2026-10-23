@@ -194,7 +194,9 @@
                 {
                   "enum": [
                     "en",
-                    "es"
+                    "es",
+                    "ru",
+                    "uk"
                   ],
                   "type": "string"
                 },

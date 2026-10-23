@@ -25,10 +25,19 @@ from app.android_config import AndroidConfig
 from app.android_voice import AndroidVoiceSession, VoiceCallbacks
 
 
-@pytest.mark.parametrize("language", ["en", "es"])
+@pytest.mark.parametrize("language", ["en", "es", "ru", "uk"])
 @pytest.mark.parametrize("turn_detection", ["semantic", "vad"])
 @pytest.mark.parametrize(
-    "provider_error", [None, "soniox", "inworld", "interruption", "finish", "finish_interruption"]
+    "provider_error",
+    [
+        None,
+        "soniox",
+        "inworld",
+        "interruption",
+        "finish",
+        "finish_interruption",
+        "finish_after_text",
+    ],
 )
 async def test_streaming_audio_transcripts_and_provider_failure(
     packet, tmp_path, monkeypatch, caplog, language, turn_detection, provider_error
@@ -53,9 +62,14 @@ async def test_streaming_audio_transcripts_and_provider_failure(
     spoken_texts = []
     output_audio = b"\x00\x04" * 1600
     input_audio = b"\x00\x08" * 160
-    utterance = "We open at noon." if language == "en" else "Abrimos al mediodía."
-    reply = "Thank you. " if language == "en" else "Muchas gracias. "
-    reply += "Anything else? " if language == "en" else "¿Algo más? "
+    phrases = {
+        "en": ("We open at noon.", "Thank you. ", "Anything else?"),
+        "es": ("Abrimos al mediodía.", "Muchas gracias. ", "¿Algo más?"),
+        "ru": ("Мы открываемся в полдень.", "Спасибо. ", "Что-нибудь ещё?"),
+        "uk": ("Ми відкриваємося опівдні.", "Дякую. ", "Щось іще?"),
+    }
+    utterance, acknowledgement, unheard_tail = phrases[language]
+    reply = acknowledgement + unheard_tail + " "
 
     async def soniox_provider(ws):
         assert ws.request.headers["Authorization"] == "Bearer test-soniox-private-credential"
@@ -176,9 +190,15 @@ async def test_streaming_audio_transcripts_and_provider_failure(
                 assert params["extra_body"]["provider"]["only"] == ["groq"]
                 assert params["extra_body"]["provider"]["allow_fallbacks"] is False
                 assert "reasoning" not in params["extra_body"]
-                if provider_error in {"finish", "finish_interruption"}:
+                assert params["temperature"] == 0.4
+                if provider_error in {"finish", "finish_interruption", "finish_after_text"}:
+                    if provider_error == "finish_after_text":
+                        await self.push_frame(LLMTextFrame(reply))
+                        await output_received.wait()
                     await session._finish_call(
-                        SimpleNamespace(arguments={"farewell": reply}, result_callback=AsyncMock())
+                        SimpleNamespace(
+                            arguments={"farewell": reply}, result_callback=AsyncMock(), llm=self
+                        )
                     )
                     model_done.set()
                     return
@@ -211,7 +231,7 @@ async def test_streaming_audio_transcripts_and_provider_failure(
                 assistant_stopped_at.append(time.monotonic())
 
         async def finish(guard):
-            assert provider_error == "finish"
+            assert provider_error in {"finish", "finish_after_text"}
             assert assistant_stopped_at and guard()
             assert time.monotonic() - assistant_stopped_at[-1] >= 2.9
             finished.set()
@@ -229,6 +249,7 @@ async def test_streaming_audio_transcripts_and_provider_failure(
             selected_sim_slot=1,
             caller_number="+12025550199",
             allowed_destinations=["+12025550123"],
+            conversation_languages=["en", "es", "ru", "uk"],
             stt_transport="soniox",
             soniox_key_file=soniox_key,
             soniox_turn_detection=turn_detection,
@@ -283,7 +304,7 @@ async def test_streaming_audio_transcripts_and_provider_failure(
             assert stt_configs[0]["endpoint_sensitivity"] == (
                 0.3 if turn_detection == "semantic" else None
             )
-            assert stt_configs[0]["language_hints"] == [language]
+            assert set(stt_configs[0]["language_hints"]) == {"en", "es", "ru", "uk"}
             finalize_allowed.set()
             if turn_detection == "vad":
                 await session._worker.queue_frame(VADUserStartedSpeakingFrame())
@@ -324,7 +345,6 @@ async def test_streaming_audio_transcripts_and_provider_failure(
                     assert timings[0]["call_id"] == "call_streaming"
                     assert utterance not in json.dumps(timings)
                     assert reply.strip() not in json.dumps(timings)
-                unheard_tail = "Anything else?" if language == "en" else "¿Algo más?"
                 assert all(
                     unheard_tail not in row[1] for row in transcripts if row[0] == "assistant"
                 )
@@ -334,6 +354,14 @@ async def test_streaming_audio_transcripts_and_provider_failure(
             elif provider_error in {"soniox", "inworld"}:
                 await asyncio.wait_for(failed.wait(), 5)
                 assert not output_received.is_set()
+                errors = [
+                    json.loads(record.getMessage().removeprefix("voice_error "))
+                    for record in caplog.records
+                    if record.getMessage().startswith("voice_error ")
+                ]
+                assert errors and errors[0]["call_id"] == "call_streaming"
+                assert "Test rejection" not in json.dumps(errors)
+                assert "private-credential" not in json.dumps(errors)
             else:
                 await asyncio.wait_for(assistant_recorded.wait(), 10)
                 assert output_received.is_set() and model_done.is_set()
@@ -349,7 +377,7 @@ async def test_streaming_audio_transcripts_and_provider_failure(
                 assert len(contexts) == (
                     2 if provider_error in {"finish", "finish_interruption"} else 1
                 )
-                if provider_error == "finish":
+                if provider_error in {"finish", "finish_after_text"}:
                     await asyncio.wait_for(finished.wait(), 5)
             if tts_configs:
                 assert tts_configs[0]["modelId"] == "inworld-tts-2"
@@ -359,7 +387,7 @@ async def test_streaming_audio_transcripts_and_provider_failure(
                     "audioEncoding": "PCM",
                     "sampleRateHertz": 8000,
                 }
-                assert tts_configs[0]["language"] == ("en-US" if language == "en" else "es-ES")
+                assert "language" not in tts_configs[0]
                 assert tts_configs[0]["autoMode"]
         finally:
             finalize_allowed.set()

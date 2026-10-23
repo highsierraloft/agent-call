@@ -67,7 +67,7 @@ class ContextPacket(BaseModel):
     owner: OwnerContext
     target: TargetContext
     objective: str = Field(min_length=1, max_length=4000)
-    language: Literal["en", "es"] | None = None
+    language: Literal["en", "es", "ru", "uk"] | None = None
     relevant_facts: list[str] = Field(default_factory=list, max_length=100)
     preferences: list[str] = Field(default_factory=list, max_length=100)
     hard_constraints: list[str] = Field(default_factory=list, max_length=100)

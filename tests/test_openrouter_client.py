@@ -24,3 +24,24 @@ async def test_voice_service_uses_supplied_timeout_and_session_client():
         assert str(llm._client.base_url) == "https://openrouter.ai/api/v1/"
     finally:
         await http.aclose()
+
+
+async def test_farewell_tracking_does_not_reuse_a_previous_reply(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from pipecat.frames.frames import LLMFullResponseStartFrame, LLMTextFrame
+    from pipecat.services.openrouter.llm import OpenRouterLLMService
+
+    monkeypatch.setattr(OpenRouterLLMService, "push_frame", AsyncMock())
+    http = DefaultAsyncHttpxClient(timeout=httpx2.Timeout(10, connect=3))
+    try:
+        llm = OpenRouterVoiceLLMService(api_key="test-key", http_client=http)
+        await llm.push_frame(LLMFullResponseStartFrame())
+        await llm.push_frame(LLMTextFrame("Goodbye."))
+        previous = llm.response_serial
+        assert llm.generated_response_text == "Goodbye."
+        await llm.push_frame(LLMFullResponseStartFrame())
+        assert llm.response_serial > previous
+        assert llm.generated_response_text == ""
+    finally:
+        await http.aclose()
