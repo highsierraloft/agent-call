@@ -20,7 +20,7 @@ The existing OpenAI/Twilio backend remains the default and retains its existing 
 
 - Set `call_backend` to `android_openrouter` and `post_call_extraction_enabled` to `false`.
 - Supply a call language, `en` or `es`, and `escalation.mode=end_call` in the brief.
-- The first deployment requires an explicit destination allowlist and limits calls to 90 seconds.
+- The deployment requires an explicit destination allowlist. The default limit is 90 seconds; the owner-authorized conversation trial uses 180 seconds.
 - The backend checks fresh phone supervision, the selected SIM policy, and SIP registration before dialing.
 - It opens and validates the owned audio channel before originating the cellular leg.
 - It starts the conversation only after the cellular channel reports an answer.
@@ -42,14 +42,35 @@ The Android path has no owner transfer, mid-call question tool, answering-machin
 or in-call web search. If a required fact is missing, the voice agent ends politely.
 These features remain available in the separate upstream backend where documented.
 
-The latest local suite passed 794 tests with two skips and 88.23% coverage.
+The latest local suite passed 796 tests with two skips and 88.24% coverage.
 The media simulation checks connection setup, buffering, shutdown, and task cleanup without model requests.
 These checks do not prove cellular audio or acceptable conversation timing.
 One owner-controlled outbound call completed with seven transcript turns and confirmed hangup.
 The owner reported clear audio, long pauses, and a repeated introduction. The timing changes and
 introduction fix were followed by a streaming call that completed with three transcript turns and agent-requested hangup.
-That call did not repeat the introduction, and the phone returned to idle. Its audible timing and interruption feedback remain pending.
+That call did not repeat the introduction, and the phone returned to idle. The owner found it faster, but too robotic and too short.
 Full unattended recovery remains unverified.
+
+## Conversational delivery
+
+The voice instructions use a brief, relationship-appropriate greeting instead of a mandatory technical identity announcement.
+An expected owner test can start casually. Other recipients still hear whom the assistant is calling for and why.
+The assistant must answer identity questions honestly and must not impersonate a human or invent personal experiences.
+Turns use plain spoken language, contractions, specific reactions, and at most one question at a time.
+The instructions discourage repeated acknowledgements, excessive praise, repeated readbacks, and restarting the introduction.
+The approved brief determines whether the call is a practical task or a longer conversation.
+
+Runtime notices give the model the remaining call budget without an extra model request.
+Near the limit, a closing cue waits for a quiet boundary before requesting a natural farewell.
+It does not duplicate an existing farewell, and it is canceled when the session ends.
+The separate three-second reply window and interruption handling remain in place.
+The hard cap includes connection setup, so a conversation can be shorter than the configured maximum.
+
+The owner-authorized longer trial uses `inworld_model=inworld-tts-2` for more expressive speech,
+with the same Ashley voice and a 180-second cap. Flash remains the lower-cost configuration default.
+One direct provider replay with the updated prompt and TTS-2 measured 1.72 seconds to server PCM.
+This is slower than the earlier Flash samples; actual phone quality and timing still require the owner trial.
+Live text-model probes covered the opening, relevant follow-ups, a request to stay, truthful identity, and closing.
 
 ## Deployment
 
