@@ -57,6 +57,9 @@ def register_tools(
         meta=auth_meta,
         description=(
             "Prepare a call brief without dialing. Specify the initial language as en, es, ru, or uk, and escalation.mode=end_call. "
+            "Set intention=task, conversation, sales, roleplay, or prank; personality=professional, warm, salesperson, or playful. "
+            "For sales, supply business name, description, offer, desired_next_step, and the recipient's actual contact_permission (recipient_requested or prior_consent); never infer consent. Use intention=roleplay for fictional sales practice. "
+            "Choose max_duration_seconds for the call or use the deployment default. "
             "Collect missing facts from the owner before calling. Hermes interprets the returned transcript. "
             + CONTEXT_GUIDANCE
             if android_backend
@@ -141,7 +144,7 @@ def register_tools(
             "May persist a missing result; a separate extraction model is used only when enabled. "
             "When result_source is transcript_only, assess the transcript in the requesting agent. "
             "The Android backend also returns a complete Markdown transcript attachment and, "
-            "when recorded, an MP3 audio attachment on the first page. Send both files to the owner. "
+            "when recorded, an MP3 on the first page. In shared-file deployments, use each file's local_path or MEDIA path to attach it. Send both files to the owner. "
             "Check artifacts.audio_status; never claim audio exists when recording is unavailable. "
             "call_status describes telephony; finalization_status describes extraction; "
             "transcript_complete is a capture heuristic. None of these establishes objective "
@@ -157,12 +160,21 @@ def register_tools(
             service = get_service()
             result = await service.get_result(call_id, after_sequence=after_sequence)
             content = [TextContent(type="text", text=json.dumps(result, ensure_ascii=False))]
-            if android_backend and after_sequence == 0 and result.get("artifacts", {}).get("files"):
+            artifacts = result.get("artifacts", {})
+            if (
+                android_backend
+                and after_sequence == 0
+                and artifacts.get("files")
+                and artifacts.get("delivery_status", "available") == "available"
+            ):
                 from app.android_calls import AndroidCallService
 
                 if isinstance(service, AndroidCallService):
+                    attachments = service.artifact_content(call_id)
                     return ToolResult(
-                        content=[*content, *service.artifact_content(call_id)],
+                        content=[*attachments, *content]
+                        if artifacts.get("delivery") == "shared_local_files"
+                        else [*content, *attachments],
                         structured_content=result,
                     )
             return ToolResult(content=content, structured_content=result)
@@ -268,6 +280,31 @@ def register_tools(
             result.get("next_after_sequence"),
         )
         return result
+
+    if android_backend:
+
+        @mcp.tool(
+            name="phone_call_poll",
+            annotations={
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "openWorldHint": False,
+                "idempotentHint": True,
+            },
+            meta=auth_meta,
+            description=(
+                "Wait up to twenty seconds for this call to finish. Use timeout_seconds=20. "
+                "This is a poll: repeat it after every idle timeout until terminal=true, then "
+                "retrieve get_call_result and its files. An unchanged active state is expected. "
+                "This backend does not ask mid-call questions."
+            ),
+        )
+        async def phone_call_poll(
+            call_id: str,
+            after_sequence: int = 0,
+            timeout_seconds: Annotated[float, Field(ge=20, le=25)] = 20.0,
+        ) -> dict[str, Any]:
+            return await wait_for_call_event(call_id, after_sequence, timeout_seconds)
 
     @mcp.tool(
         name="answer_call_question",

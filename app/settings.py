@@ -154,6 +154,7 @@ class Settings(BaseSettings):
     hold_max_seconds: float = Field(default=300.0, gt=0, le=600)
     wait_for_call_event_max_seconds: float = Field(default=20.0, gt=0, le=25)
     allowed_country_codes: list[str] = Field(default_factory=lambda: ["+1"])
+    allow_all_country_codes: bool = False
     live_model: Literal["gpt-live-1"] = "gpt-live-1"
     live_voice: str = "marin"
     live_backend_model: Literal["gpt-5.6-terra"] = "gpt-5.6-terra"

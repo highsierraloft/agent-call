@@ -42,6 +42,7 @@ TranscriptItem = tuple[Literal["callee", "assistant"], str, str, bool]
 class _Call:
     call_id: str
     packet: ContextPacket
+    duration_seconds: int
     created: float = field(default_factory=time.monotonic)
     media_attached: asyncio.Event = field(default_factory=asyncio.Event)
     media_in_application: asyncio.Event = field(default_factory=asyncio.Event)
@@ -72,6 +73,9 @@ class AndroidCallService:
         self.artifacts = CallArtifacts(
             settings.database_path.parent / "call-artifacts",
             recording_enabled=config.recording_enabled,
+            export_root=config.artifact_export_directory,
+            client_root=config.artifact_client_directory,
+            export_group=config.artifact_export_group,
         )
         self._runtime: _Call | None = None
         self._operations = asyncio.Lock()
@@ -97,10 +101,17 @@ class AndroidCallService:
         return task
 
     def _validate_packet(self, packet: ContextPacket) -> None:
-        if packet.target.phone not in self.config.allowed_destinations:
+        if (
+            not self.config.allow_any_destination
+            and packet.target.phone not in self.config.allowed_destinations
+        ):
             raise CallRefusal(
-                "destination_not_enabled", "The destination is not enabled for testing"
+                "destination_not_enabled", "The destination is not enabled by this deployment"
             )
+        try:
+            self.config.call_duration(packet.max_duration_seconds)
+        except ValueError as exc:
+            raise CallRefusal("duration_not_allowed", str(exc)) from exc
         if packet.target.phone == self.config.caller_number:
             raise CallRefusal("service_number", "The phone cannot call its own line")
         if packet.escalation.mode != "end_call":
@@ -110,6 +121,19 @@ class AndroidCallService:
 
     async def prepare(self, request: PreparePhoneCallInput) -> PreparePhoneCallOutput:
         self._validate_packet(request.context)
+        if await self.db.is_destination_suppressed(request.context.target.phone):
+            raise CallRefusal("recipient_opted_out", "The recipient requested no further calls")
+        request = request.model_copy(
+            update={
+                "context": request.context.model_copy(
+                    update={
+                        "max_duration_seconds": self.config.call_duration(
+                            request.context.max_duration_seconds
+                        )
+                    }
+                )
+            }
+        )
         return await prepare_call(self.settings, self.db, request)
 
     async def start(
@@ -127,6 +151,8 @@ class AndroidCallService:
             if plan is None:
                 raise CallRefusal(ErrorCode.PLAN_NOT_FOUND)
             self._validate_packet(plan.context)
+            if await self.db.is_destination_suppressed(plan.context.target.phone):
+                raise CallRefusal("recipient_opted_out", "The recipient requested no further calls")
             if plan.context.language not in self.config.conversation_languages:
                 raise CallRefusal("language_required", "Specify an enabled initial call language")
             try:
@@ -143,14 +169,18 @@ class AndroidCallService:
                 explicit_confirmation=explicit_confirmation,
                 confirmation_text=confirmation_text,
             )
-            runtime = _Call(approved.call_id, approved.context)
+            runtime = _Call(
+                approved.call_id,
+                approved.context,
+                self.config.call_duration(approved.context.max_duration_seconds),
+            )
             self._runtime = runtime
             runtime.writer = self._spawn(self._write_transcript(runtime))
             self._spawn(self._setup(runtime))
         return StartPhoneCallOutput(
             call_id=approved.call_id,
             state=CallState.PREWARMING,
-            next_action="Wait with wait_for_call_event until terminal, then retrieve every transcript page with get_call_result. Hermes interprets the transcript. This backend has no owner transfer or mid-call question tool.",
+            next_action="Use phone_call_poll with timeout_seconds=20 until terminal, then retrieve every transcript page and both attachments with get_call_result. Hermes interprets the transcript. This backend has no owner transfer or mid-call question tool.",
         )
 
     async def _setup(self, runtime: _Call) -> None:
@@ -159,7 +189,7 @@ class AndroidCallService:
                 row = await self.db.get_call(runtime.call_id)
                 if not row or row["state"] != CallState.PREWARMING:
                     return
-                await self.asterisk.create_media(runtime.call_id, self.config.max_call_seconds)
+                await self.asterisk.create_media(runtime.call_id, runtime.duration_seconds)
             await asyncio.wait_for(runtime.media_attached.wait(), 15)
             assert runtime.voice is not None
             await asyncio.wait_for(runtime.voice.ready.wait(), 15)
@@ -170,11 +200,6 @@ class AndroidCallService:
                 if not await self.asterisk.gateway_registered():
                     raise AsteriskError("Phone registration changed during setup")
                 await self.asterisk.bridge_media(runtime.call_id)
-                if self.config.recording_enabled:
-                    self.artifacts.mark_recording_start(runtime.call_id)
-                    await self.asterisk.start_recording(
-                        runtime.call_id, self.config.max_call_seconds
-                    )
                 if not await self.db.promote_to_ready_to_activate(runtime.call_id):
                     return
                 if not await self.db.claim_callee_dial(runtime.call_id):
@@ -183,7 +208,7 @@ class AndroidCallService:
                     return
                 # Never retry an originate whose remote outcome may be unknown.
                 await self.asterisk.originate(
-                    runtime.call_id, runtime.packet.target.phone, self.config.max_call_seconds
+                    runtime.call_id, runtime.packet.target.phone, runtime.duration_seconds
                 )
         except Exception:
             await self.terminate_call(runtime.call_id, "android_setup_failed")
@@ -209,6 +234,9 @@ class AndroidCallService:
         ) -> None:
             runtime.transcript.put_nowait((speaker, text, source, interrupted))
 
+        async def suppress_destination() -> None:
+            await self.db.suppress_destination(runtime.packet.target.phone, runtime.call_id)
+
         await websocket.accept(subprotocol="media")
         runtime.voice = AndroidVoiceSession(
             websocket,
@@ -216,7 +244,7 @@ class AndroidCallService:
             packet=runtime.packet,
             config=self.config,
             api_key=self._api_key,
-            callbacks=VoiceCallbacks(transcript, failed, finish),
+            callbacks=VoiceCallbacks(transcript, failed, finish, suppress_destination),
         )
         runtime.voice_task = asyncio.current_task()
         runtime.media_attached.set()
@@ -277,6 +305,13 @@ class AndroidCallService:
                     return
                 try:
                     await self.asterisk.bridge_answered_call(runtime.call_id)
+                    if self.config.recording_enabled:
+                        # Asterisk abandons a recording with no incoming audio before answer.
+                        # Start only once the answered cellular channel feeds the bridge.
+                        await self.asterisk.start_recording(
+                            runtime.call_id, runtime.duration_seconds
+                        )
+                        self.artifacts.mark_recording_start(runtime.call_id)
                     if not await self.db.promote_to_active(runtime.call_id):
                         return
                     await self.db.update_call(
@@ -313,7 +348,8 @@ class AndroidCallService:
             if self.config.recording_enabled:
                 try:
                     await asyncio.wait_for(self.asterisk.stop_recording(call_id), timeout=1)
-                except (AsteriskError, TimeoutError):
+                    self.artifacts.mark_recording_stop(call_id)
+                except (AsteriskError, TimeoutError, OSError, ValueError):
                     logger.warning("Call recording stop was not confirmed")
             await self.asterisk.hangup(call_id)
             if runtime and runtime.voice:
@@ -394,7 +430,12 @@ class AndroidCallService:
                     age = (
                         datetime.now(UTC) - datetime.fromisoformat(row["created_at"])
                     ).total_seconds()
-                    if age > self.config.max_call_seconds:
+                    budget = (
+                        self._runtime.duration_seconds
+                        if self._runtime and self._runtime.call_id == call_id
+                        else self.config.max_call_seconds
+                    )
+                    if age > budget:
                         await self.terminate_call(call_id, "duration_limit")
                     elif self.phone.read() is None:
                         await self.terminate_call(call_id, "android_supervision_lost")
@@ -471,10 +512,11 @@ class AndroidCallService:
             "result": result.model_dump(mode="json") if result else None,
             "cost": None,
             "cost_note": "Carrier and voice-provider usage are not reconciled here.",
-            "transcript": [turn.model_dump(mode="json") for turn in turns[:100]],
+            "artifacts": artifacts,
             "next_transcript_cursor": turns[99].sequence_number if len(turns) > 100 else None,
             "transcript_is_call_content": True,
-            "artifacts": artifacts,
+            "recipient_opted_out": await self.db.call_recorded_opt_out(call_id),
+            "transcript": [turn.model_dump(mode="json") for turn in turns[:100]],
         }
 
     def artifact_content(self, call_id: str) -> list[ArtifactContent]:
@@ -498,7 +540,7 @@ class AndroidCallService:
                     "next_after_sequence": max(0, after_sequence),
                     "next_action": "Retrieve get_call_result and all transcript pages."
                     if terminal
-                    else "Continue wait_for_call_event; the call is still in progress.",
+                    else "Continue phone_call_poll with timeout_seconds=20; the call is still in progress.",
                 }
             await asyncio.sleep(min(0.25, max(0, deadline - time.monotonic())))
 

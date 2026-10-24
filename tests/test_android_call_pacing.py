@@ -13,6 +13,7 @@ from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
 
 from app.android_voice import AndroidVoiceSession, ClosingWindow
+from app.spoken_identity import SpeakerIdentityFilter
 
 
 @pytest.mark.parametrize("already_closing", [False, True])
@@ -118,3 +119,21 @@ async def test_already_played_farewell_reuses_only_the_current_model_response():
     assert session.closing.guard()()
     session.closing.user_started()
     assert session.closing.guard() is None
+
+
+async def test_corrected_identity_does_not_block_farewell_playback_confirmation():
+    session = AndroidVoiceSession.__new__(AndroidVoiceSession)
+    session.closing = ClosingWindow()
+    session._identity_filter = SpeakerIdentityFilter("Alex")
+    session._worker = SimpleNamespace(queue_frame=AsyncMock())
+    await session._finish_call(
+        SimpleNamespace(
+            arguments={"farewell": "This is Alex. Goodbye."},
+            result_callback=AsyncMock(),
+            llm=SimpleNamespace(),
+        )
+    )
+    speech = session._worker.queue_frame.call_args.args[0]
+    assert speech.text == "This is Alex's AI assistant. Goodbye."
+    session.closing.played(speech.text, interrupted=False)
+    assert session.closing.guard()()

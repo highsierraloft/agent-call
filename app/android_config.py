@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 
 class AndroidConfig(BaseModel):
@@ -17,10 +17,15 @@ class AndroidConfig(BaseModel):
     openrouter_key_file: Path = Path("/run/secrets/openrouter-api-key")
     phone_status_file: Path = Path("/run/phone/status.json")
     selected_sim_slot: Literal[1, 2]
-    caller_number: str = Field(pattern=r"^\+[1-9][0-9]{7,14}$")
-    allowed_destinations: list[str] = Field(min_length=1, max_length=20)
-    max_call_seconds: int = Field(default=90, ge=30, le=600)
+    caller_number: str = Field(pattern=r"^\+[1-9][0-9]{1,14}$")
+    allowed_destinations: list[str] = Field(default_factory=list, max_length=1000)
+    allow_any_destination: bool = False
+    default_call_seconds: int = Field(default=1800, ge=30, le=7200)
+    max_call_seconds: int = Field(default=7200, ge=30, le=7200)
     recording_enabled: bool = False
+    artifact_export_directory: Path | None = None
+    artifact_client_directory: Path | None = None
+    artifact_export_group: int | None = Field(default=None, ge=0)
     conversation_languages: list[Literal["en", "es", "ru", "uk"]] = Field(
         default=["en", "es"], min_length=1, max_length=4
     )
@@ -35,6 +40,7 @@ class AndroidConfig(BaseModel):
     stt_model: str = "deepgram/nova-3"
     dialogue_model: str = "google/gemini-3.1-flash-lite"
     dialogue_provider: str | None = Field(default=None, min_length=1)
+    dialogue_fallback_providers: list[str] = Field(default_factory=list, max_length=4)
     reasoning_effort: Literal["none", "minimal", "low", "medium", "high"] | None = "none"
     tts_model: str = "elevenlabs/eleven-flash-v2.5"
     voice: str = "sarah"
@@ -76,9 +82,25 @@ class AndroidConfig(BaseModel):
     def validate_destinations(cls, values: list[str]) -> list[str]:
         import re
 
-        if any(not re.fullmatch(r"\+[1-9][0-9]{7,14}", value) for value in values):
-            raise ValueError("Test destinations must use full international numbers")
+        if any(not re.fullmatch(r"\+[1-9][0-9]{1,14}", value) for value in values):
+            raise ValueError("Destinations must use full international numbers")
         return values
+
+    @model_validator(mode="after")
+    def validate_destination_policy(self) -> AndroidConfig:
+        if not self.allow_any_destination and not self.allowed_destinations:
+            raise ValueError("Configure allowed destinations or enable any valid destination")
+        if bool(self.artifact_export_directory) != bool(self.artifact_client_directory):
+            raise ValueError("Artifact export and client directories must be configured together")
+        for path in (self.artifact_export_directory, self.artifact_client_directory):
+            if path is not None and (not path.is_absolute() or ".." in path.parts):
+                raise ValueError("Artifact directories must be absolute paths without traversal")
+        return self
+
+    def call_duration(self, requested_seconds: int | None) -> int:
+        if requested_seconds is not None and requested_seconds > self.max_call_seconds:
+            raise ValueError("The requested duration exceeds the configured call safety limit")
+        return requested_seconds or min(self.default_call_seconds, self.max_call_seconds)
 
     def openrouter_key(self) -> SecretStr:
         value = self.openrouter_key_file.read_text().strip()

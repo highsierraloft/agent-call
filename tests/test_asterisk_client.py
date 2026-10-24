@@ -110,7 +110,7 @@ async def test_media_is_not_bridged_before_answer():
     [
         ("../other", "+12025550123", 60),
         ("call_test", "+12025550123@evil", 60),
-        ("call_test", "+12025550123", 601),
+        ("call_test", "+12025550123", 7201),
     ],
 )
 async def test_invalid_requests_never_reach_asterisk(identifier, number, duration):
@@ -149,7 +149,7 @@ async def test_external_media_creation_waits_for_separate_bridge_step():
         await ast.close()
 
 
-async def test_recording_uses_owned_bridge_and_a_bounded_wav():
+async def test_recording_uses_owned_bridge_and_a_bounded_wav(tmp_path):
     requests = []
 
     def handle(request):
@@ -160,10 +160,11 @@ async def test_recording_uses_owned_bridge_and_a_bounded_wav():
     try:
         await ast.start_recording("call_test", 180)
         await ast.stop_recording("call_test")
-        assert await ast.recording_bytes("call_test") == b"wav-data"
+        assert await ast.download_recording("call_test", tmp_path / "recording.wav")
+        assert (tmp_path / "recording.wav").read_bytes() == b"wav-data"
         await ast.delete_recording("call_test")
         with pytest.raises(ValueError):
-            await ast.recording_bytes("../outside")
+            await ast.download_recording("../outside", tmp_path / "recording.wav")
     finally:
         await ast.close()
     assert requests[0].url.path == "/ari/bridges/call_test-bridge/record"
@@ -180,3 +181,18 @@ async def test_recording_uses_owned_bridge_and_a_bounded_wav():
     assert requests[1].url.path == "/ari/recordings/live/call_test/stop"
     assert requests[2].url.path == "/ari/recordings/stored/call_test/file"
     assert requests[3].url.path == "/ari/recordings/stored/call_test"
+
+
+async def test_short_valid_international_destination_reaches_the_dial_adapter():
+    requests = []
+
+    def handle(request):
+        requests.append(request)
+        return httpx.Response(200, json={})
+
+    ast = client(handle)
+    try:
+        await ast.originate("call_short_number", "+6903101", 1800)
+    finally:
+        await ast.close()
+    assert json.loads(requests[0].content)["endpoint"] == "PJSIP/+6903101@android"

@@ -12,7 +12,8 @@ Hermes interprets the transcript and writes any summary.
 Pipecat handles speech recognition, conversation, and speech generation.
 OpenRouter supplies the dialogue model. Speech can use OpenRouter or direct streaming providers.
 The deployment uses Asterisk 22.11.0, Pipecat 1.13.0, and pipecat-asterisk 0.1.4.
-The latter needs explicit cleanup of its unmanaged audio flow task. A regression test checks that cleanup.
+The integration uses pipecat-asterisk's serializer with Pipecat's native paced WebSocket transport.
+This keeps playback timing aligned with transcript and closing events, without a second unmanaged audio buffer.
 A separate gateway fork pins an explicit Android phone account. The stock gateway does not meet that requirement.
 
 The Android backend reuses Agent Call's prepared plans, confirmation binding, atomic call admission,
@@ -21,7 +22,8 @@ The existing OpenAI/Twilio backend remains the default and retains its existing 
 
 - Set `call_backend` to `android_openrouter` and `post_call_extraction_enabled` to `false`.
 - Supply an initial language, `en`, `es`, `ru`, or `uk`, and `escalation.mode=end_call` in the brief.
-- The deployment requires an explicit destination allowlist. The default limit is 90 seconds; the owner-authorized conversation trial uses 180 seconds.
+- The deployment can use a destination allowlist or explicitly allow any valid international destination.
+- Calls default to 30 minutes and accept a per-call duration up to the configured safety ceiling, at most two hours.
 - The backend checks fresh phone supervision, the selected SIM policy, and SIP registration before dialing.
 - It opens and validates the owned audio channel before originating the cellular leg.
 - It starts the conversation only after the cellular channel reports an answer.
@@ -43,7 +45,7 @@ The Android path has no owner transfer, mid-call question tool, answering-machin
 or in-call web search. If a required fact is missing, the voice agent ends politely.
 These features remain available in the separate upstream backend where documented.
 
-The latest local suite passed 853 tests with two skips and 88.55% coverage.
+The latest local suite passed 920 tests with two skips and 88.76% coverage.
 The media simulation checks connection setup, buffering, shutdown, and task cleanup without model requests.
 These checks do not prove cellular audio or acceptable conversation timing.
 One owner-controlled outbound call completed with seven transcript turns and confirmed hangup.
@@ -55,26 +57,85 @@ Full unattended recovery remains unverified.
 ## Recording and file delivery
 
 Set `android.recording_enabled=true` to record the mixed Asterisk bridge, which contains both sides.
-Recording starts before dialing. If recording cannot start, the service refuses the call.
+Recording starts after the answered cellular channel joins the bridge, before the agent speaks.
+Starting earlier can make Asterisk stop with no audio while the phone is still ringing.
+If recording setup fails, the answered call ends without starting the conversation.
 Hangup remains bounded even when stopping the recording fails. Recording does not add a speech-provider request.
 
-The worker requires FFmpeg, included in `Dockerfile.android`.
+The worker requires FFmpeg and ffprobe, included in `Dockerfile.android`.
 Mount private, writable persistent storage at `/var/spool/asterisk` in the Asterisk container,
 owned by UID/GID `1000:1000`. Keep the worker's `/data` persistent as well.
 Completed files are stored under `/data/call-artifacts/<call_id>/` with private file permissions.
 The worker converts the mixed WAV to a mono, 16 kHz, 32 kbit/s MP3 after the call.
-It removes leading dialing silence and deletes the source recording only after conversion succeeds.
-Failed conversions retain the source for retry. No retention schedule is configured.
+It verifies a playable audio stream before returning the MP3. It rejects recordings that ended substantially before the capture stop time.
+Downloads stream to disk with a 128 MiB bound. Source recordings are deleted only after successful conversion and validation.
+Failed conversions retain the source for retry. Invalid existing MP3s are preserved separately and excluded from attachments.
+No retention schedule is configured.
 
-On the first result page, MCP returns native `audio/mpeg` audio and an embedded `text/markdown` document.
+Without an export directory, the first result page returns native `audio/mpeg` audio and an embedded `text/markdown` document.
 The document contains every stored transcript turn, even when the JSON response needs more pages.
 Later pages return transcript data and file metadata without repeating the attachments.
 `artifacts.audio_status` distinguishes available, pending, missing, unanswered, and unrecorded audio.
 Calls made before recording was enabled have a Markdown transcript only.
 
-Hermes's native MCP renderer caches both files. Its call workflow sends those local files as attachments.
+For Hermes on the same server, configure `artifact_export_directory`, `artifact_client_directory`, and `artifact_export_group`.
+The worker copies validated files into a dedicated output folder and returns each `local_path`, plus explicit `MEDIA:` tags.
+Hermes can then attach both files through its existing output mount. This avoids its 10 MiB MCP wire-body cap for long recordings.
+It preserves the MP3 bitrate and does not change Hermes code or its response-size protection.
+Use a dedicated bind for the calling worker, with the client group as a supplementary group.
+Export directories use mode `2750`; files use `0640`. Hermes has read access to these copies, not the private database or provider credentials.
+The private originals remain under `/data/call-artifacts`. No retention schedule is configured for either copy.
+Check both `audio_status` and `delivery_status`; an export failure must not be reported as successful file delivery.
+
+A real two-hour synthetic MP3 measured 28,800,512 bytes. Its shared-file MCP payload was 1,638 bytes.
+Hermes's native attachment parser accepted both paths, verified their hashes, and had read-only access.
+This was a file-delivery check, not a telephone call or Telegram upload.
 A synthetic Asterisk recording, real FFmpeg conversion, and native Hermes file decoding passed.
-The complete Hermes-initiated phone call and Telegram attachment delivery still need a live acceptance test.
+The first Hermes-initiated call delivered its Markdown file but exposed the early-recording bug and fragmented speech.
+The fixes passed isolated Asterisk recording and a complete MCP prepare/start/wait/end/result cycle with synthetic speech.
+Real-phone audio quality after these fixes still needs a listening test; no overnight test dialed a telephone.
+
+Hermes uses the Android-only `phone_call_poll` alias, with a 20–25 second wait and a default of 20 seconds.
+The original `wait_for_call_event` remains available for existing clients. Both call the same implementation.
+The pinned Hermes runtime recognizes the `_poll` naming convention as repeatable polling; the old name can trigger its stall detector.
+Keep other loop protections enabled. The deployment sets Hermes's supported `agent.max_turns` to 500 and this MCP server's timeout to 90 seconds.
+That leaves room for a two-hour call, result pagination, and file conversion. The default 60 turns could stop monitoring too early.
+
+## Intentions and personalities
+
+The call brief has separate `intention` and `personality` fields. Style never expands the owner's authority.
+
+| Field | Choices |
+| --- | --- |
+| `intention` | `task`, `conversation`, `sales`, `roleplay`, `prank` |
+| `personality` | `professional`, `warm`, `salesperson`, `playful` |
+| `max_duration_seconds` | Optional per-call budget, from 30 to 7,200 seconds, within the deployment ceiling |
+
+For `sales`, `business` must include `name`, `description`, `offer`, `desired_next_step`, and `contact_permission`.
+The last field is `recipient_requested` or `prior_consent`; Hermes must obtain the actual fact, never infer it.
+Optional business fields are `audience`, `approved_claims`, and `pricing`.
+Preparation returns missing fields before creating a plan. The confirmation binds the intention, personality, and duration.
+For fictional sales practice, use `intention=roleplay` with `personality=salesperson`.
+
+The sales prompt uses a concise reason for calling, a relevant benefit, listening, a clarifying question for ambiguous objections,
+and one approved next step. It prohibits invented claims, prices, relationships, and pressure after a clear refusal.
+This is an original synthesis of [Gong's cold-calling guidance](https://www.gong.io/blog/cold-calling-tips)
+and [Salesforce's prospecting guidance](https://trailhead.salesforce.com/content/learn/modules/cold-calling-for-sales/start-cold-calling-prospects).
+Vendor research informs the prompt; it does not establish this agent's sales effectiveness.
+
+Conversation and role-play can include clearly fictional stories and harmless persona changes.
+Prank calls must remain light and clearly playful, reveal the joke when asked, and stop if unwelcome.
+They must not impersonate trusted people or authorities, fabricate emergencies, or seek payment or sensitive information.
+Requests to change style or language are distinct from requests to override permissions or reveal hidden instructions.
+Direct sales opt-outs are saved before closing and prevent future starts, including previously prepared plans.
+The result reports `recipient_opted_out`. The voice model cannot remove that preference.
+The selected Inworld path corrects explicit English and Spanish claims to be the named owner before synthesis and transcript creation.
+This supplements the identity instructions; it is not a claim of universal language-model compliance.
+
+Spain requires prior consent for automated commercial calls. Unsolicited commercial calls cannot use mobile-number ranges.
+The Spanish mobile SIM is therefore not a route for unrestricted unsolicited sales outreach.
+See [AEPD's automated-call guidance](https://www.aepd.es/preguntas-frecuentes/5-publicidad-no-deseada/FAQ-0502-llamadas-automatizadas-sin-intervencion-humana-con-fines-comerciales)
+and [Order TDF/149/2025, article 9](https://www.boe.es/buscar/act.php?id=BOE-A-2025-2870#a9).
 
 ## Conversational delivery
 
@@ -98,7 +159,7 @@ The longer phone test returned 23 transcript turns and ended when the owner aske
 The owner found it better but still robotic in wording and voice. Quality acceptance remains open.
 Live text-model probes covered the opening, relevant follow-ups, a request to stay, truthful identity, and closing.
 
-The multilingual trial selects `dialogue_model=qwen/qwen3.8-27b`,
+The earlier multilingual trial selected `dialogue_model=qwen/qwen3.8-27b`,
 `dialogue_provider=cerebras`, and `reasoning_effort=none` through the existing OpenRouter account.
 Dialogue temperature is 0.4. The earlier English trial used Llama 3.3 70B on Groq.
 It keeps Inworld TTS-2 with `inworld_voice=Wade` and `inworld_delivery_mode=CREATIVE`.
@@ -112,8 +173,8 @@ at the median and 1.249 seconds at the maximum. A replay with synthetic backgrou
 measured 1.210 and 1.346 seconds respectively. These small samples measure speech end to
 server PCM; they exclude cellular and handset delay. Subsequent phone evidence is recorded below; wider voice-quality acceptance remains open.
 
-A pinned provider has fallback disabled, so an unavailable route fails instead of silently
-using a different host. A null reasoning setting omits that API field for non-reasoning models.
+With no fallback providers configured, a pinned route fails instead of silently using another host.
+The selected configuration permits only the listed Google fallback. A null reasoning setting omits that API field for non-reasoning models.
 Runtime notices update one leading system instruction instead of accumulating in the history.
 Pipecat's latency observer logs stage durations without speech or credentials.
 
@@ -207,8 +268,9 @@ Measure recognition, model, speech generation, and playback separately. Do not c
 
 ## Soniox and Inworld streaming route
 
-The selected route uses Soniox STT RT v5, Inworld TTS-2 with Wade, and Qwen3.8 27B
-on Cerebras through OpenRouter. It reuses the pinned Pipecat adapters.
+The selected route uses Soniox STT RT v5, Inworld TTS-2 with Wade, and Gemini 3.1 Flash-Lite
+through OpenRouter. Google AI Studio is preferred, with Google Vertex available as a fallback.
+It reuses the pinned Pipecat adapters.
 Provider replays and one cellular trial exercised all four enabled languages. Wider recognition and voice quality still require testing.
 
 Merge these fields into the private configuration's `android` object:
@@ -218,13 +280,14 @@ Merge these fields into the private configuration's `android` object:
   "conversation_languages": ["en", "es", "ru", "uk"],
   "stt_transport": "soniox",
   "soniox_model": "stt-rt-v5",
-  "soniox_turn_detection": "vad",
+  "soniox_turn_detection": "semantic",
   "tts_transport": "inworld",
   "inworld_model": "inworld-tts-2",
   "inworld_voice": "Wade",
   "inworld_delivery_mode": "CREATIVE",
-  "dialogue_model": "qwen/qwen3.8-27b",
-  "dialogue_provider": "cerebras",
+  "dialogue_model": "google/gemini-3.1-flash-lite",
+  "dialogue_provider": "google-ai-studio",
+  "dialogue_fallback_providers": ["google-vertex"],
   "reasoning_effort": "none"
 }
 ```
@@ -232,20 +295,33 @@ Merge these fields into the private configuration's `android` object:
 Mount the Soniox key at `/run/secrets/soniox-api-key` and Inworld's complete Basic (Base64)
 credential at `/run/secrets/inworld-api-key`. Keep the existing OpenRouter mount for dialogue.
 These must be separate read-only files, available only to the voice worker.
-Missing or malformed credentials refuse service startup. They do not trigger a provider fallback.
+Missing or malformed credentials refuse service startup. Language-model fallbacks are limited to the configured providers.
 The default transports remain `openrouter_file` and `openrouter` for existing configuration compatibility.
 
-Soniox receives continuous mono 8 kHz PCM. The selected `vad` mode uses local voice activity detection
-to request finalization after 300 ms of silence. Pipecat waits for the finalized transcript before requesting a reply.
-It uses the existing speech-timeout strategy without an additional silence timer or turn-analysis model.
-Resumed speech interrupts playback and cancels pending hangup. Test pauses and numbers before wider use.
+The hardening replay reproduced one-word Qwen replies after interrupted history on both Cerebras and DeepInfra.
+Cerebras also returned shared-pool rate limits. Four direct Gemini cases returned complete replies with 0.528–0.736 seconds to first text.
+These are small samples, not a general model benchmark. The voice replay separately exercised interruptions and four languages.
+The Inworld adapter excludes unsaid fallback text after interruption. Closing waits for paced audio output to finish before starting its reply window.
 
-The optional `semantic` mode lets Soniox decide when turns end. It uses latency level 2,
+To remove trial-only destination and duration settings, set `settings.allow_all_country_codes=true`,
+`android.allow_any_destination=true`, `android.allowed_destinations=[]`, `android.default_call_seconds=1800`,
+and `android.max_call_seconds=7200`. Invalid numbers, short emergency codes, the service's own line, explicit-confirmation checks,
+single-call admission, and the selected-SIM policy remain enforced.
+
+`scripts/android_media_canary.py` verifies two-way PCM and mixed recording on an isolated Asterisk instance.
+`scripts/android_mcp_canary.py` verifies the MCP lifecycle, persistence, MP3, and Markdown using local WebSocket legs and synthetic speech.
+Run these only in disposable, network-isolated containers with generated test credentials and private output storage.
+Neither script has a cellular dialing path. They complement the provider replays and offline suite; they do not replace a handset listening test.
+
+Soniox receives continuous mono 8 kHz PCM. The selected `semantic` mode lets Soniox decide when turns end.
+Local voice activity detection interrupts playback promptly and cancels pending hangup.
+The mode uses latency level 2,
 sensitivity 0.3, and a 500 ms maximum endpoint-delay setting by default.
 These settings are omitted from provider requests in `vad` mode; sending them with endpointing disabled is invalid.
-One English semantic replay reached 1.09 seconds, but two Spanish samples took 2.05–2.11 seconds.
-The selected local mode reduced the Spanish example to 1.29 seconds while preserving the opening time.
-These are synthetic speech-end-to-server-PCM measurements, excluding carrier and handset delay.
+The optional `vad` mode finalizes after 300 ms of silence. Earlier probes found it faster on two Spanish examples,
+but the overnight overlap replay showed that short pauses can split a sentence and trigger unwanted responses.
+The revised voice replay measured ordinary reply starts at 1.297–1.711 seconds at the server.
+This small sample excludes carrier and handset delay and does not establish production latency percentiles.
 The deployment supplies the enabled language hints. The transcript preserves both speakers and their original language.
 
 A small wrapper normalizes Soniox error-only messages before Pipecat 1.13 parses them.
@@ -270,5 +346,5 @@ holds it until confirmation, and discards it if the speaker resumes. The three-s
 The route fails closed when its separate credential is absent. It never falls back to uploaded audio.
 A loopback test verifies that audio reaches the streaming service before the user finishes a turn.
 
-This optional route remains available for comparison. The selected next route is Soniox and Inworld;
-neither selection establishes a fastest provider. The current deployment still uses completed-utterance uploads.
+This optional route remains available for comparison. The deployment uses Soniox and Inworld streaming;
+neither selection establishes a fastest provider.

@@ -6,6 +6,7 @@ import base64
 import json
 import re
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
@@ -134,22 +135,29 @@ class AsteriskClient:
         self.resource_ids(call_id)
         await self.request("POST", f"recordings/live/{call_id}/stop", missing_ok=True)
 
-    async def recording_bytes(self, call_id: str) -> bytes | None:
+    async def download_recording(self, call_id: str, destination: Path) -> bool:
         self.resource_ids(call_id)
+        temporary = destination.with_suffix(".pending.wav")
         try:
             async with self._http.stream("GET", f"recordings/stored/{call_id}/file") as response:
                 if response.status_code == 404:
-                    return None
+                    return False
                 if response.status_code != 200:
                     raise AsteriskError("The stored recording is unavailable")
-                data = bytearray()
-                async for chunk in response.aiter_bytes():
-                    data.extend(chunk)
-                    if len(data) > 20 * 1024 * 1024:
-                        raise AsteriskError("The stored recording exceeds the size limit")
-                return bytes(data)
+                total = 0
+                with temporary.open("xb") as output:
+                    temporary.chmod(0o600)
+                    async for chunk in response.aiter_bytes(64 * 1024):
+                        total += len(chunk)
+                        if total > 128 * 1024 * 1024:
+                            raise AsteriskError("The stored recording exceeds the size limit")
+                        output.write(chunk)
+                temporary.replace(destination)
+                return True
         except httpx.RequestError as exc:
             raise AsteriskError("The stored recording download failed") from exc
+        finally:
+            temporary.unlink(missing_ok=True)
 
     async def delete_recording(self, call_id: str) -> None:
         self.resource_ids(call_id)
@@ -157,12 +165,12 @@ class AsteriskClient:
 
     @staticmethod
     def _validate_duration(seconds: int) -> None:
-        if not 1 <= seconds <= 600:
-            raise ValueError("Call duration must be between 1 and 600 seconds")
+        if not 1 <= seconds <= 7200:
+            raise ValueError("Call duration must be between 1 and 7200 seconds")
 
     async def originate(self, call_id: str, number: str, max_seconds: int) -> None:
         cell, _, _ = self.resource_ids(call_id)
-        if not re.fullmatch(r"\+[1-9][0-9]{7,14}", number):
+        if not re.fullmatch(r"\+[1-9][0-9]{1,14}", number):
             raise ValueError("Destination must be a complete international number")
         self._validate_duration(max_seconds)
         await self.request(

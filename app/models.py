@@ -61,6 +61,19 @@ class EscalationContext(BaseModel):
     owner_phone: E164
 
 
+class BusinessContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    description: str | None = Field(default=None, min_length=1, max_length=2000)
+    offer: str | None = Field(default=None, min_length=1, max_length=2000)
+    desired_next_step: str | None = Field(default=None, min_length=1, max_length=1000)
+    contact_permission: Literal["recipient_requested", "prior_consent"] | None = None
+    audience: str | None = Field(default=None, max_length=1000)
+    approved_claims: list[str] = Field(default_factory=list, max_length=30)
+    pricing: str | None = Field(default=None, max_length=1000)
+
+
 class ContextPacket(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -68,6 +81,10 @@ class ContextPacket(BaseModel):
     target: TargetContext
     objective: str = Field(min_length=1, max_length=4000)
     language: Literal["en", "es", "ru", "uk"] | None = None
+    intention: Literal["task", "conversation", "sales", "roleplay", "prank"] = "task"
+    personality: Literal["professional", "warm", "salesperson", "playful"] = "warm"
+    business: BusinessContext | None = None
+    max_duration_seconds: int | None = Field(default=None, ge=30, le=7200)
     relevant_facts: list[str] = Field(default_factory=list, max_length=100)
     preferences: list[str] = Field(default_factory=list, max_length=100)
     hard_constraints: list[str] = Field(default_factory=list, max_length=100)

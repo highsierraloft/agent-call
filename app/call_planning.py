@@ -19,7 +19,13 @@ def confirmation_summary(packet: ContextPacket) -> str:
         f"Call {target.name}"
         f"{f' at {target.organization}' if target.organization else ''} "
         f"on {target.phone} to: {packet.objective}. "
-        "The assistant may only make the listed allowed commitments and will follow all "
+        f"Intention: {packet.intention}; personality: {packet.personality}. "
+        + (
+            f"Duration budget: {packet.max_duration_seconds} seconds. "
+            if packet.max_duration_seconds
+            else ""
+        )
+        + "The assistant may only make the listed allowed commitments and will follow all "
         "hard constraints."
     )
 
@@ -34,6 +40,10 @@ async def prepare_call(
         missing.append("authority_basis")
     if settings.call_backend == "android_openrouter" and request.context.language is None:
         missing.append("language")
+    if request.context.intention == "sales":
+        for name in ["name", "description", "offer", "desired_next_step", "contact_permission"]:
+            if request.context.business is None or not getattr(request.context.business, name):
+                missing.append("business." + name)
     errors = validate_context(request.context, settings)
     if errors:
         first = errors[0]

@@ -31,6 +31,9 @@ from app.android_voice import AndroidVoiceSession, VoiceCallbacks
     "provider_error",
     [
         None,
+        "long_reply",
+        "identity",
+        "sales_opt_out",
         "soniox",
         "inworld",
         "interruption",
@@ -60,7 +63,8 @@ async def test_streaming_audio_transcripts_and_provider_failure(
     media_flushed = asyncio.Queue()
     stt_configs, tts_configs, transcripts, contexts, model_inputs = [], [], [], [], []
     spoken_texts = []
-    output_audio = b"\x00\x04" * 1600
+    synthesis_seconds = 1.2 if provider_error == "long_reply" else 0.2
+    output_audio = b"\x00\x04" * int(8000 * synthesis_seconds)
     input_audio = b"\x00\x08" * 160
     phrases = {
         "en": ("We open at noon.", "Thank you. ", "Anything else?"),
@@ -70,6 +74,20 @@ async def test_streaming_audio_transcripts_and_provider_failure(
     }
     utterance, acknowledgement, unheard_tail = phrases[language]
     reply = acknowledgement + unheard_tail + " "
+    expected_reply = reply.strip()
+    if provider_error == "identity":
+        reply = f"Hey Alex, it's {packet.owner.display_name}. Let's start. "
+        expected_reply = f"Hey Alex, it's {packet.owner.display_name}'s AI assistant. Let's start."
+    suppressed = AsyncMock()
+    if provider_error == "sales_opt_out":
+        utterance = {
+            "en": "Do not call me again.",
+            "es": "No me vuelvas a llamar.",
+            "ru": "Не звоните мне больше.",
+            "uk": "Більше не телефонуйте мені.",
+        }[language]
+        reply = acknowledgement
+        expected_reply = reply.strip()
 
     async def soniox_provider(ws):
         assert ws.request.headers["Authorization"] == "Bearer test-soniox-private-credential"
@@ -143,10 +161,11 @@ async def test_streaming_audio_transcripts_and_provider_failure(
                                         "wordAlignment": {
                                             "words": words,
                                             "wordStartTimeSeconds": [
-                                                i * 0.2 / len(words) for i in range(len(words))
+                                                i * synthesis_seconds / len(words)
+                                                for i in range(len(words))
                                             ],
                                             "wordEndTimeSeconds": [
-                                                (i + 1) * 0.2 / len(words)
+                                                (i + 1) * synthesis_seconds / len(words)
                                                 for i in range(len(words))
                                             ],
                                         }
@@ -155,6 +174,11 @@ async def test_streaming_audio_transcripts_and_provider_failure(
                             }
                         }
                     )
+                )
+                # Each synthetic send_text is one auto-mode synthesis batch.
+                # Inworld resets word timestamps only after this boundary.
+                await ws.send(
+                    json.dumps({"result": {"contextId": context_id, "flushCompleted": {}}})
                 )
             if "flush_context" in message:
                 await ws.send(
@@ -191,13 +215,28 @@ async def test_streaming_audio_transcripts_and_provider_failure(
                 assert params["extra_body"]["provider"]["allow_fallbacks"] is False
                 assert "reasoning" not in params["extra_body"]
                 assert params["temperature"] == 0.4
-                if provider_error in {"finish", "finish_interruption", "finish_after_text"}:
+                if provider_error in {
+                    "finish",
+                    "finish_interruption",
+                    "finish_after_text",
+                    "sales_opt_out",
+                }:
+                    if provider_error == "sales_opt_out":
+                        assert context.tool_choice == {
+                            "type": "function",
+                            "function": {"name": "finish_call"},
+                        }
                     if provider_error == "finish_after_text":
                         await self.push_frame(LLMTextFrame(reply))
                         await output_received.wait()
                     await session._finish_call(
                         SimpleNamespace(
-                            arguments={"farewell": reply}, result_callback=AsyncMock(), llm=self
+                            arguments={
+                                "farewell": reply,
+                                "do_not_call": provider_error == "sales_opt_out",
+                            },
+                            result_callback=AsyncMock(),
+                            llm=self,
                         )
                     )
                     model_done.set()
@@ -220,7 +259,7 @@ async def test_streaming_audio_transcripts_and_provider_failure(
             if "FLUSH_MEDIA" in message.get("text", ""):
                 media_flushed.put_nowait(True)
             if message.get("bytes") and not output_received.is_set():
-                if provider_error not in {"finish", "finish_interruption"}:
+                if provider_error not in {"finish", "finish_interruption", "sales_opt_out"}:
                     assert not model_done.is_set()
                 output_received.set()
 
@@ -231,7 +270,7 @@ async def test_streaming_audio_transcripts_and_provider_failure(
                 assistant_stopped_at.append(time.monotonic())
 
         async def finish(guard):
-            assert provider_error in {"finish", "finish_after_text"}
+            assert provider_error in {"finish", "finish_after_text", "sales_opt_out"}
             assert assistant_stopped_at and guard()
             assert time.monotonic() - assistant_stopped_at[-1] >= 2.9
             finished.set()
@@ -265,10 +304,15 @@ async def test_streaming_audio_transcripts_and_provider_failure(
         session = AndroidVoiceSession(
             websocket,
             call_id="call_streaming",
-            packet=packet.model_copy(update={"language": language}),
+            packet=packet.model_copy(
+                update={
+                    "language": language,
+                    "intention": "sales" if provider_error == "sales_opt_out" else "task",
+                }
+            ),
             config=config,
             api_key="unused-openrouter-test-key",
-            callbacks=VoiceCallbacks(record, failed.set, finish),
+            callbacks=VoiceCallbacks(record, failed.set, finish, suppressed),
         )
         task = asyncio.create_task(session.run())
         try:
@@ -333,7 +377,7 @@ async def test_streaming_audio_transcripts_and_provider_failure(
                 assert len(model_inputs) == 1
                 assert model_done.is_set() == (provider_error == "finish_interruption")
                 assert len(contexts) == (
-                    2 if provider_error in {"finish", "finish_interruption"} else 1
+                    2 if provider_error in {"finish", "finish_interruption", "sales_opt_out"} else 1
                 )
                 if turn_detection == "vad":
                     timings = [
@@ -364,21 +408,24 @@ async def test_streaming_audio_transcripts_and_provider_failure(
                 assert "private-credential" not in json.dumps(errors)
             else:
                 await asyncio.wait_for(assistant_recorded.wait(), 10)
+                await asyncio.wait_for(session._idle.wait(), 10)
                 assert output_received.is_set() and model_done.is_set()
                 assert not failed.is_set()
                 assert [row[0] for row in transcripts] == ["callee", "assistant"]
                 assert transcripts[0][1] == utterance
-                assert transcripts[1][1].strip() == reply.strip()
+                assert transcripts[1][1].strip() == expected_reply
                 assert not transcripts[1][3]
-                assert " ".join(spoken_texts) == reply.strip()
+                assert " ".join(spoken_texts) == expected_reply
                 assert output_audio * len(spoken_texts) == b"".join(
                     item.get("bytes", b"") for item in outgoing
                 )
                 assert len(contexts) == (
-                    2 if provider_error in {"finish", "finish_interruption"} else 1
+                    2 if provider_error in {"finish", "finish_interruption", "sales_opt_out"} else 1
                 )
-                if provider_error in {"finish", "finish_after_text"}:
+                if provider_error in {"finish", "finish_after_text", "sales_opt_out"}:
                     await asyncio.wait_for(finished.wait(), 5)
+                if provider_error == "sales_opt_out":
+                    suppressed.assert_awaited_once()
             if tts_configs:
                 assert tts_configs[0]["modelId"] == "inworld-tts-2"
                 assert tts_configs[0]["voiceId"] == "Wade"

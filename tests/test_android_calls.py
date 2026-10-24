@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -46,7 +47,7 @@ class FakeAsterisk:
         self.recordings = []
 
     async def start_recording(self, call_id, seconds):
-        assert call_id in self.media and not self.dials
+        assert call_id in self.bridged
         self.recordings.append(call_id)
         if self.recording_error:
             raise AsteriskError("Recording rejected")
@@ -139,6 +140,8 @@ async def android(settings, database, packet, monkeypatch):
         selected_sim_slot=1,
         caller_number="+14155550199",
         allowed_destinations=[packet.target.phone],
+        default_call_seconds=90,
+        max_call_seconds=90,
     )
     asterisk = FakeAsterisk()
     phone = FakePhone()
@@ -398,14 +401,85 @@ async def test_start_requires_initial_language_in_deployment_allowlist(android, 
     assert started.state == CallState.PREWARMING
 
 
-async def test_recording_failure_prevents_dialing_and_still_cleans_up(android):
+async def test_recording_starts_after_answer_and_failure_prevents_conversation(android):
     h = android
     h.service.config.recording_enabled = True
     h.asterisk.recording_error = True
     call = await start(h)
-    await attach(h, expect_dial=False)
+    await attach(h)
+    assert h.asterisk.recordings == []
+    await h.asterisk.queue.put(
+        {"type": "StasisStart", "channel": {"id": call.call_id + "-cell", "state": "Up"}}
+    )
     await wait_until(lambda: bool(h.asterisk.ended))
     h.phone.idle = True
     await wait_state(h.service, call.call_id, CallState.FAILED)
     assert h.asterisk.recordings == [call.call_id]
+    assert not h.service._runtime or not h.service._runtime.voice.started
+
+
+async def test_production_destination_and_budget_are_bound_to_the_approved_plan(android):
+    h = android
+    h.service.config.allow_any_destination = True
+    h.service.settings.allow_all_country_codes = True
+    h.service.config.max_call_seconds = 7200
+    h.packet.max_duration_seconds = 1800
+    h.packet.target.phone = "+442079460123"
+    plan = await prepare(h)
+    assert "1800 seconds" in plan.confirmation_summary
+    call = await h.service.start(
+        plan.plan_id, explicit_confirmation=True, confirmation_text=plan.confirmation_summary
+    )
+    await attach(h)
+    assert h.asterisk.dials == [(call.call_id, h.packet.target.phone, 1800)]
+    assert h.service._runtime.duration_seconds == 1800
+    await answer(h, call.call_id)
+    await h.service.db.execute(
+        "UPDATE calls SET created_at=? WHERE call_id=?",
+        ((datetime.now(UTC) - timedelta(seconds=200)).isoformat(), call.call_id),
+    )
+    checked_at = h.service._watchdog_at
+    await wait_until(lambda: h.service._watchdog_at > checked_at)
+    assert (await h.service.get_snapshot(call.call_id)).state == CallState.ACTIVE
+    assert not h.asterisk.ended
+
+
+async def test_excessive_budget_and_own_line_are_still_refused(android):
+    h = android
+    h.service.config.allow_any_destination = True
+    h.packet.max_duration_seconds = 120
+    with pytest.raises(CallRefusal, match="safety limit"):
+        await prepare(h)
+    h.packet.max_duration_seconds = 60
+    h.packet.target.phone = h.service.config.caller_number
+    with pytest.raises(CallRefusal, match="own line"):
+        await prepare(h)
     assert h.asterisk.dials == []
+
+
+async def test_opt_out_blocks_preparation_and_previously_prepared_plans(android):
+    from app.db import Database
+
+    h = android
+    saved = await prepare(h)
+    call = await start(h)
+    await attach(h)
+    await answer(h, call.call_id)
+    await h.service._runtime.voice.callbacks.suppress_destination()
+    await h.service.terminate_call(call.call_id, "owner_request")
+    h.phone.idle = True
+    await wait_state(h.service, call.call_id, CallState.COMPLETED)
+    h.service.config.allow_any_destination = True
+    assert (await h.service.get_result(call.call_id))["recipient_opted_out"] is True
+    with pytest.raises(CallRefusal, match="no further calls"):
+        await prepare(h)
+    with pytest.raises(CallRefusal, match="no further calls"):
+        await h.service.start(
+            saved.plan_id, explicit_confirmation=True, confirmation_text=saved.confirmation_summary
+        )
+    reopened = Database(h.service.settings.database_path)
+    await reopened.initialize()
+    try:
+        assert await reopened.is_destination_suppressed(h.packet.target.phone)
+    finally:
+        await reopened.close()

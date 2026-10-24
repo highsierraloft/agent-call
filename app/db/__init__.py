@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.db.calls import CallsMixin
+from app.db.contacts import ContactsMixin
 from app.db.deployment import DEPLOYMENT_LOCK_TTL, DeploymentLockedError, DeploymentMixin
 from app.db.engine import DatabaseEngine
 from app.db.oauth import OAuthMixin
@@ -28,6 +29,7 @@ class Database(
     PlansMixin,
     DeploymentMixin,
     CallsMixin,
+    ContactsMixin,
     TransfersMixin,
     TerminationMixin,
     TelemetryMixin,

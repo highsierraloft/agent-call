@@ -92,6 +92,11 @@ CREATE TABLE IF NOT EXISTS calls (
 );
 
 CREATE INDEX IF NOT EXISTS calls_state_idx ON calls(state);
+CREATE TABLE IF NOT EXISTS destination_suppressions (
+    phone TEXT PRIMARY KEY,
+    call_id TEXT NOT NULL REFERENCES calls(call_id),
+    created_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS calls_twilio_ai_idx ON calls(twilio_ai_call_sid);
 CREATE INDEX IF NOT EXISTS calls_twilio_callee_idx ON calls(twilio_callee_call_sid);
 

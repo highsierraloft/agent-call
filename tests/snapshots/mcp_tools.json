@@ -162,6 +162,118 @@
               "maxItems": 100,
               "type": "array"
             },
+            "business": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "approved_claims": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "maxItems": 30,
+                      "type": "array"
+                    },
+                    "audience": {
+                      "anyOf": [
+                        {
+                          "maxLength": 1000,
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null
+                    },
+                    "contact_permission": {
+                      "anyOf": [
+                        {
+                          "enum": [
+                            "recipient_requested",
+                            "prior_consent"
+                          ],
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null
+                    },
+                    "description": {
+                      "anyOf": [
+                        {
+                          "maxLength": 2000,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null
+                    },
+                    "desired_next_step": {
+                      "anyOf": [
+                        {
+                          "maxLength": 1000,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null
+                    },
+                    "name": {
+                      "anyOf": [
+                        {
+                          "maxLength": 160,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null
+                    },
+                    "offer": {
+                      "anyOf": [
+                        {
+                          "maxLength": 2000,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null
+                    },
+                    "pricing": {
+                      "anyOf": [
+                        {
+                          "maxLength": 1000,
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null
+                    }
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "escalation": {
               "properties": {
                 "mode": {
@@ -189,6 +301,17 @@
               "maxItems": 100,
               "type": "array"
             },
+            "intention": {
+              "default": "task",
+              "enum": [
+                "task",
+                "conversation",
+                "sales",
+                "roleplay",
+                "prank"
+              ],
+              "type": "string"
+            },
             "language": {
               "anyOf": [
                 {
@@ -199,6 +322,19 @@
                     "uk"
                   ],
                   "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "max_duration_seconds": {
+              "anyOf": [
+                {
+                  "maximum": 7200,
+                  "minimum": 30,
+                  "type": "integer"
                 },
                 {
                   "type": "null"
@@ -234,6 +370,16 @@
                 "callback_number"
               ],
               "type": "object"
+            },
+            "personality": {
+              "default": "warm",
+              "enum": [
+                "professional",
+                "warm",
+                "salesperson",
+                "playful"
+              ],
+              "type": "string"
             },
             "preferences": {
               "items": {
