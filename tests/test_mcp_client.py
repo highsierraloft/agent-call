@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 import respx
 from fastapi.testclient import TestClient
 
@@ -57,7 +58,8 @@ def _tool_payload(response) -> dict[str, Any]:
 
 
 @respx.mock
-def test_header_compatible_mcp_client_prepares_without_provider_calls(settings):
+@pytest.mark.parametrize("omit_owner_numbers", [False, True])
+def test_header_compatible_mcp_client_prepares_without_provider_calls(settings, omit_owner_numbers):
     app = create_app(settings)
     with TestClient(app) as client:
         initialize = client.post(
@@ -94,6 +96,10 @@ def test_header_compatible_mcp_client_prepares_without_provider_calls(settings):
         tools = _parse_mcp_payload(listed)["result"]["tools"]
         assert {tool["name"] for tool in tools} == EXPECTED_TOOLS
 
+        arguments = _prepare_arguments()
+        if omit_owner_numbers:
+            arguments["context"]["owner"].pop("callback_number")
+            arguments["context"]["escalation"].pop("owner_phone")
         prepared = client.post(
             "/mcp/",
             json={
@@ -102,7 +108,7 @@ def test_header_compatible_mcp_client_prepares_without_provider_calls(settings):
                 "method": "tools/call",
                 "params": {
                     "name": "prepare_phone_call",
-                    "arguments": _prepare_arguments(),
+                    "arguments": arguments,
                 },
             },
             headers=session_headers,

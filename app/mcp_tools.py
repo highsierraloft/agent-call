@@ -57,6 +57,8 @@ def register_tools(
         meta=auth_meta,
         description=(
             "Prepare a call brief without dialing. Specify the initial language as en, es, ru, or uk, and escalation.mode=end_call. "
+            "Omit owner.callback_number and escalation.owner_phone: the server fills in the saved owner number. "
+            "Only target.phone is the recipient; it can be any valid international destination. Never ask for a masked saved owner number or copy target.phone into owner fields. "
             "Set intention=task, conversation, sales, roleplay, or prank; personality=professional, warm, salesperson, or playful. "
             "For sales, supply business name, description, offer, desired_next_step, and the recipient's actual contact_permission (recipient_requested or prior_consent); never infer consent. Use intention=roleplay for fictional sales practice. "
             "Choose max_duration_seconds for the call or use the deployment default. "

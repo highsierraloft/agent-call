@@ -47,7 +47,10 @@ TERMINAL_STATES = {
 class OwnerContext(BaseModel):
     display_name: str = Field(min_length=1, max_length=120)
     timezone: str = Field(min_length=1, max_length=80)
-    callback_number: E164
+    callback_number: E164 | Literal["configured"] = Field(
+        default="configured",
+        description="Omit to use the server's saved owner number. Never use the recipient number here.",
+    )
 
 
 class TargetContext(BaseModel):
@@ -58,7 +61,10 @@ class TargetContext(BaseModel):
 
 class EscalationContext(BaseModel):
     mode: Literal["transfer_to_owner", "end_call"]
-    owner_phone: E164
+    owner_phone: E164 | Literal["configured"] = Field(
+        default="configured",
+        description="Omit to use the server's saved owner number, including when mode is end_call.",
+    )
 
 
 class BusinessContext(BaseModel):

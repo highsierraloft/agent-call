@@ -22,6 +22,11 @@ The existing OpenAI/Twilio backend remains the default and retains its existing 
 
 - Set `call_backend` to `android_openrouter` and `post_call_extraction_enabled` to `false`.
 - Supply an initial language, `en`, `es`, `ru`, or `uk`, and `escalation.mode=end_call` in the brief.
+- Omit `owner.callback_number` and `escalation.owner_phone` to use the server's saved owner number.
+  The explicit value `configured` has the same effect. Preparation resolves these fields before
+  policy checks and stores the real values in the private plan. Explicit mismatches remain errors.
+  Only `target.phone` identifies the recipient. A masked owner number in a client tool result
+  must not cause a request for the owner number or substitution of the recipient's number.
 - The deployment can use a destination allowlist or explicitly allow any valid international destination.
 - Calls default to 30 minutes and accept a per-call duration up to the configured safety ceiling, at most two hours.
 - The backend checks fresh phone supervision, the selected SIM policy, and SIP registration before dialing.
@@ -45,7 +50,8 @@ The Android path has no owner transfer, mid-call question tool, answering-machin
 or in-call web search. If a required fact is missing, the voice agent ends politely.
 These features remain available in the separate upstream backend where documented.
 
-The latest local suite passed 920 tests with two skips and 88.76% coverage.
+The overnight release suite passed 920 tests with two skips and 88.76% coverage.
+The owner-number fix passed 95 focused policy, preparation, Android, and MCP tests, plus lint and types.
 The media simulation checks connection setup, buffering, shutdown, and task cleanup without model requests.
 These checks do not prove cellular audio or acceptable conversation timing.
 One owner-controlled outbound call completed with seven transcript turns and confirmed hangup.

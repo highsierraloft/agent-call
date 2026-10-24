@@ -33,6 +33,22 @@ def confirmation_summary(packet: ContextPacket) -> str:
 async def prepare_call(
     settings: Settings, db: Database, request: PreparePhoneCallInput
 ) -> PreparePhoneCallOutput:
+    packet = request.context
+    if "configured" in (packet.owner.callback_number, packet.escalation.owner_phone):
+        if not settings.owner_phone_e164:
+            raise CallRefusal(
+                "owner_phone_not_configured", "The server has no saved owner callback number"
+            )
+        owner = packet.owner.model_dump()
+        escalation = packet.escalation.model_dump()
+        if owner["callback_number"] == "configured":
+            owner["callback_number"] = settings.owner_phone_e164
+        if escalation["owner_phone"] == "configured":
+            escalation["owner_phone"] = settings.owner_phone_e164
+        resolved = ContextPacket.model_validate(
+            {**packet.model_dump(), "owner": owner, "escalation": escalation}
+        )
+        request = request.model_copy(update={"context": resolved})
     missing: list[str] = []
     if not request.requested_by_owner:
         missing.append("requested_by_owner")
