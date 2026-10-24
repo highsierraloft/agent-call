@@ -23,7 +23,7 @@ astdbdir => /tmp/asterisk
 astkeydir => /tmp/asterisk
 astdatadir => /var/lib/asterisk
 astagidir => /var/lib/asterisk/agi-bin
-astspooldir => /tmp/asterisk/spool
+astspooldir => /var/spool/asterisk
 astrundir => /tmp/asterisk
 astlogdir => /tmp/asterisk/log
 [options]
@@ -119,8 +119,8 @@ def main() -> None:
     os.umask(0o077)
     config = json.loads(Path("/run/secrets/asterisk.json").read_text())
     destination = Path("/tmp/asterisk/config")
-    for folder in ("spool", "log"):
-        (destination.parent / folder).mkdir(parents=True, exist_ok=True)
+    (destination.parent / "log").mkdir(parents=True, exist_ok=True)
+    Path("/var/spool/asterisk/recording").mkdir(parents=True, exist_ok=True)
     render(config, destination)
     os.execv(
         "/usr/sbin/asterisk", ["asterisk", "-f", "-n", "-C", str(destination / "asterisk.conf")]

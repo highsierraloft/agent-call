@@ -16,6 +16,7 @@ from fastapi import WebSocket
 from app.android_config import AndroidConfig
 from app.android_voice import AndroidVoiceSession, VoiceCallbacks
 from app.asterisk_client import AsteriskClient, AsteriskError
+from app.call_artifacts import ArtifactContent, CallArtifacts
 from app.call_planning import claim_approved_call, prepare_call
 from app.db import Database
 from app.errors import CallRefusal, ErrorCode
@@ -68,6 +69,10 @@ class AndroidCallService:
         self.settings, self.db, self.config = settings, db, config
         self.asterisk, self.phone, self._api_key = asterisk, phone, api_key
         self.finalizer = Finalizer(settings, db, None)
+        self.artifacts = CallArtifacts(
+            settings.database_path.parent / "call-artifacts",
+            recording_enabled=config.recording_enabled,
+        )
         self._runtime: _Call | None = None
         self._operations = asyncio.Lock()
         self._tasks: set[asyncio.Task[None]] = set()
@@ -165,6 +170,11 @@ class AndroidCallService:
                 if not await self.asterisk.gateway_registered():
                     raise AsteriskError("Phone registration changed during setup")
                 await self.asterisk.bridge_media(runtime.call_id)
+                if self.config.recording_enabled:
+                    self.artifacts.mark_recording_start(runtime.call_id)
+                    await self.asterisk.start_recording(
+                        runtime.call_id, self.config.max_call_seconds
+                    )
                 if not await self.db.promote_to_ready_to_activate(runtime.call_id):
                     return
                 if not await self.db.claim_callee_dial(runtime.call_id):
@@ -300,6 +310,11 @@ class AndroidCallService:
             runtime = self._runtime if self._runtime and self._runtime.call_id == call_id else None
             # Preserve this observation boundary across retries and startup recovery.
             requested_at = self._ending_after.setdefault(call_id, time.time())
+            if self.config.recording_enabled:
+                try:
+                    await asyncio.wait_for(self.asterisk.stop_recording(call_id), timeout=1)
+                except (AsteriskError, TimeoutError):
+                    logger.warning("Call recording stop was not confirmed")
             await self.asterisk.hangup(call_id)
             if runtime and runtime.voice:
                 await runtime.voice.stop()
@@ -443,6 +458,13 @@ class AndroidCallService:
         ):
             result = await self.finalizer.finalize(call_id)
         turns = await self.db.get_transcript_page(call_id, after_sequence=after_sequence, limit=101)
+        artifacts: dict[str, Any] = {"audio_status": "pending", "files": []}
+        if snapshot.state in TERMINAL_STATES:
+            row = await self.db.get_call(call_id)
+            assert row is not None
+            artifacts = await self.artifacts.ensure(
+                row, await self.db.get_transcript(call_id), self.asterisk
+            )
         return {
             "call_id": call_id,
             "state": snapshot.state,
@@ -452,7 +474,11 @@ class AndroidCallService:
             "transcript": [turn.model_dump(mode="json") for turn in turns[:100]],
             "next_transcript_cursor": turns[99].sequence_number if len(turns) > 100 else None,
             "transcript_is_call_content": True,
+            "artifacts": artifacts,
         }
+
+    def artifact_content(self, call_id: str) -> list[ArtifactContent]:
+        return self.artifacts.content(call_id)
 
     async def wait_for_call_event(
         self, call_id: str, after_sequence: int = 0, timeout_seconds: float = 20.0

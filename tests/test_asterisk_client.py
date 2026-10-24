@@ -147,3 +147,36 @@ async def test_external_media_creation_waits_for_separate_bridge_step():
         assert json.loads(calls[-1].content) == {"channel": "call_test-media"}
     finally:
         await ast.close()
+
+
+async def test_recording_uses_owned_bridge_and_a_bounded_wav():
+    requests = []
+
+    def handle(request):
+        requests.append(request)
+        return httpx.Response(200, content=b"wav-data" if request.method == "GET" else b"{}")
+
+    ast = client(handle)
+    try:
+        await ast.start_recording("call_test", 180)
+        await ast.stop_recording("call_test")
+        assert await ast.recording_bytes("call_test") == b"wav-data"
+        await ast.delete_recording("call_test")
+        with pytest.raises(ValueError):
+            await ast.recording_bytes("../outside")
+    finally:
+        await ast.close()
+    assert requests[0].url.path == "/ari/bridges/call_test-bridge/record"
+    body = json.loads(requests[0].content)
+    assert body == {
+        "name": "call_test",
+        "format": "wav",
+        "maxDurationSeconds": 180,
+        "maxSilenceSeconds": 0,
+        "ifExists": "fail",
+        "beep": False,
+        "terminateOn": "none",
+    }
+    assert requests[1].url.path == "/ari/recordings/live/call_test/stop"
+    assert requests[2].url.path == "/ari/recordings/stored/call_test/file"
+    assert requests[3].url.path == "/ari/recordings/stored/call_test"

@@ -42,6 +42,20 @@ class FakeAsterisk:
         self.absent = True
         self.originate_error = False
         self.closed = False
+        self.recording_error = False
+        self.recordings = []
+
+    async def start_recording(self, call_id, seconds):
+        assert call_id in self.media and not self.dials
+        self.recordings.append(call_id)
+        if self.recording_error:
+            raise AsteriskError("Recording rejected")
+
+    async def stop_recording(self, call_id):
+        pass
+
+    async def delete_recording(self, call_id):
+        pass
 
     async def gateway_registered(self):
         return self.registered
@@ -160,7 +174,7 @@ async def start(h):
     )
 
 
-async def attach(h):
+async def attach(h, *, expect_dial=True):
     async def accept(**kwargs):
         pass
 
@@ -170,7 +184,8 @@ async def attach(h):
     await wait_until(lambda: bool(h.asterisk.media))
     task = asyncio.create_task(h.service.media_session(SimpleNamespace(accept=accept, close=close)))
     h.media_tasks.append(task)
-    await wait_until(lambda: bool(h.asterisk.dials))
+    if expect_dial:
+        await wait_until(lambda: bool(h.asterisk.dials))
 
 
 async def answer(h, call_id):
@@ -381,3 +396,16 @@ async def test_start_requires_initial_language_in_deployment_allowlist(android, 
     h.service.config.conversation_languages = ["en", "es", "ru", "uk"]
     started = await start(h)
     assert started.state == CallState.PREWARMING
+
+
+async def test_recording_failure_prevents_dialing_and_still_cleans_up(android):
+    h = android
+    h.service.config.recording_enabled = True
+    h.asterisk.recording_error = True
+    call = await start(h)
+    await attach(h, expect_dial=False)
+    await wait_until(lambda: bool(h.asterisk.ended))
+    h.phone.idle = True
+    await wait_state(h.service, call.call_id, CallState.FAILED)
+    assert h.asterisk.recordings == [call.call_id]
+    assert h.asterisk.dials == []

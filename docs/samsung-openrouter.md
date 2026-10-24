@@ -2,7 +2,8 @@
 
 This fork connects an existing Android SIP gateway to configurable voice providers.
 The requesting assistant, such as Hermes, gathers the details and sends a brief through MCP.
-The voice agent conducts the call and returns the transcript. Hermes interprets it and writes any summary.
+The voice agent conducts the call and returns the transcript and recording as files.
+Hermes interprets the transcript and writes any summary.
 
 ## Implemented path
 
@@ -19,7 +20,7 @@ authenticated MCP tools, SQLite storage, and transcript finalizer. It does not e
 The existing OpenAI/Twilio backend remains the default and retains its existing routes and tests.
 
 - Set `call_backend` to `android_openrouter` and `post_call_extraction_enabled` to `false`.
-- Supply a call language, `en` or `es`, and `escalation.mode=end_call` in the brief.
+- Supply an initial language, `en`, `es`, `ru`, or `uk`, and `escalation.mode=end_call` in the brief.
 - The deployment requires an explicit destination allowlist. The default limit is 90 seconds; the owner-authorized conversation trial uses 180 seconds.
 - The backend checks fresh phone supervision, the selected SIM policy, and SIP registration before dialing.
 - It opens and validates the owned audio channel before originating the cellular leg.
@@ -42,7 +43,7 @@ The Android path has no owner transfer, mid-call question tool, answering-machin
 or in-call web search. If a required fact is missing, the voice agent ends politely.
 These features remain available in the separate upstream backend where documented.
 
-The latest local suite passed 847 tests with two skips and 88.48% coverage.
+The latest local suite passed 853 tests with two skips and 88.55% coverage.
 The media simulation checks connection setup, buffering, shutdown, and task cleanup without model requests.
 These checks do not prove cellular audio or acceptable conversation timing.
 One owner-controlled outbound call completed with seven transcript turns and confirmed hangup.
@@ -50,6 +51,30 @@ The owner reported clear audio, long pauses, and a repeated introduction. The ti
 introduction fix were followed by a streaming call that completed with three transcript turns and agent-requested hangup.
 That call did not repeat the introduction, and the phone returned to idle. The owner found it faster, but too robotic and too short.
 Full unattended recovery remains unverified.
+
+## Recording and file delivery
+
+Set `android.recording_enabled=true` to record the mixed Asterisk bridge, which contains both sides.
+Recording starts before dialing. If recording cannot start, the service refuses the call.
+Hangup remains bounded even when stopping the recording fails. Recording does not add a speech-provider request.
+
+The worker requires FFmpeg, included in `Dockerfile.android`.
+Mount private, writable persistent storage at `/var/spool/asterisk` in the Asterisk container,
+owned by UID/GID `1000:1000`. Keep the worker's `/data` persistent as well.
+Completed files are stored under `/data/call-artifacts/<call_id>/` with private file permissions.
+The worker converts the mixed WAV to a mono, 16 kHz, 32 kbit/s MP3 after the call.
+It removes leading dialing silence and deletes the source recording only after conversion succeeds.
+Failed conversions retain the source for retry. No retention schedule is configured.
+
+On the first result page, MCP returns native `audio/mpeg` audio and an embedded `text/markdown` document.
+The document contains every stored transcript turn, even when the JSON response needs more pages.
+Later pages return transcript data and file metadata without repeating the attachments.
+`artifacts.audio_status` distinguishes available, pending, missing, unanswered, and unrecorded audio.
+Calls made before recording was enabled have a Markdown transcript only.
+
+Hermes's native MCP renderer caches both files. Its call workflow sends those local files as attachments.
+A synthetic Asterisk recording, real FFmpeg conversion, and native Hermes file decoding passed.
+The complete Hermes-initiated phone call and Telegram attachment delivery still need a live acceptance test.
 
 ## Conversational delivery
 
@@ -142,6 +167,8 @@ See [Inworld language support](https://docs.inworld.ai/tts/capabilities/multilin
 Install optional dependencies with `uv sync --extra android --all-groups --frozen`.
 `Dockerfile.android` installs the locked, hashed `requirements-android.txt` export.
 `Dockerfile.asterisk` builds the pinned upstream source and verifies its published checksum.
+`Dockerfile.asterisk-runtime` can update the entrypoint using the documented local base image;
+on a fresh host, build the full Asterisk image first.
 The entry points run without root and support a read-only root filesystem.
 
 The voice worker loads `/run/secrets/agent-call.json` with `settings` and `android` objects.
@@ -170,7 +197,7 @@ This is a preliminary choice, not a full model evaluation. Provider and phone la
 2. Check Asterisk media and gateway registration without a cellular call.
 3. Call an owner-controlled recipient and test both hangup directions.
 4. Test all enabled languages, interruptions, and a reply after the farewell.
-5. Retrieve every transcript page and confirm no summary-model request.
+5. Retrieve every transcript page, play the MP3, open the complete Markdown file, and confirm no summary-model request.
 6. Test worker failure, USB reconnect, deadlines, and restart without duplicate dialing.
 
 The initial latency target is a median below 1.5 seconds and a 90th percentile below 3 seconds,

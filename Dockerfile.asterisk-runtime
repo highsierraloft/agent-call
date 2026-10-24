@@ -1,0 +1,4 @@
+# Reuse the installed, pinned Asterisk binary for an entrypoint-only update.
+# On a fresh host, build Dockerfile.asterisk with this base tag first.
+FROM agent-call-asterisk:22.11.0-20261023.2
+COPY deploy/asterisk/entrypoint.py /opt/agent-call/asterisk-entrypoint.py

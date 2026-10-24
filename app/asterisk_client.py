@@ -113,6 +113,48 @@ class AsteriskClient:
         _, media, bridge = self.resource_ids(call_id)
         await self.request("POST", "bridges/" + bridge + "/addChannel", body={"channel": media})
 
+    async def start_recording(self, call_id: str, max_seconds: int) -> None:
+        _, _, bridge = self.resource_ids(call_id)
+        self._validate_duration(max_seconds)
+        await self.request(
+            "POST",
+            "bridges/" + bridge + "/record",
+            body={
+                "name": call_id,
+                "format": "wav",
+                "maxDurationSeconds": max_seconds,
+                "maxSilenceSeconds": 0,
+                "ifExists": "fail",
+                "beep": False,
+                "terminateOn": "none",
+            },
+        )
+
+    async def stop_recording(self, call_id: str) -> None:
+        self.resource_ids(call_id)
+        await self.request("POST", f"recordings/live/{call_id}/stop", missing_ok=True)
+
+    async def recording_bytes(self, call_id: str) -> bytes | None:
+        self.resource_ids(call_id)
+        try:
+            async with self._http.stream("GET", f"recordings/stored/{call_id}/file") as response:
+                if response.status_code == 404:
+                    return None
+                if response.status_code != 200:
+                    raise AsteriskError("The stored recording is unavailable")
+                data = bytearray()
+                async for chunk in response.aiter_bytes():
+                    data.extend(chunk)
+                    if len(data) > 20 * 1024 * 1024:
+                        raise AsteriskError("The stored recording exceeds the size limit")
+                return bytes(data)
+        except httpx.RequestError as exc:
+            raise AsteriskError("The stored recording download failed") from exc
+
+    async def delete_recording(self, call_id: str) -> None:
+        self.resource_ids(call_id)
+        await self.request("DELETE", f"recordings/stored/{call_id}", missing_ok=True)
+
     @staticmethod
     def _validate_duration(seconds: int) -> None:
         if not 1 <= seconds <= 600:
