@@ -32,6 +32,22 @@ def confirmation_summary(packet: ContextPacket) -> str:
     )
 
 
+def task_confirmation_summary(packet: ContextPacket) -> str:
+    target = packet.target
+    return (
+        f"Call {target.name} on {target.phone}. Task: {packet.objective}. "
+        f"Personality: {packet.profile_id or packet.personality}. "
+        + (f"About the recipient: {target.background}. " if target.background else "")
+        + (f"Done when: {packet.completion_criteria}. " if packet.completion_criteria else "")
+        + (
+            f"Duration budget: {packet.max_duration_seconds} seconds. "
+            if packet.max_duration_seconds
+            else ""
+        )
+        + "The assistant may make listed commitments or a routine callback on the same task unless prohibited, and will follow all hard constraints."
+    )
+
+
 async def prepare_call(
     settings: Settings,
     db: Database,
@@ -62,7 +78,7 @@ async def prepare_call(
         missing.append("authority_basis")
     if settings.call_backend == "android_openrouter" and request.context.language is None:
         missing.append("language")
-    if request.context.intention == "sales":
+    if request.context.is_commercial:
         for name in ["name", "description", "offer", "desired_next_step", "contact_permission"]:
             if request.context.business is None or not getattr(request.context.business, name):
                 missing.append("business." + name)
@@ -71,6 +87,13 @@ async def prepare_call(
         first = errors[0]
         raise CallRefusal(first.code, first.message, details=first.details)
     summary = confirmation_summary(request.context)
+    if configuration_snapshot and configuration_snapshot.get("prompt_contract_version") == 2:
+        summary = task_confirmation_summary(request.context)
+        configuration_snapshot = {
+            **configuration_snapshot,
+            "confirmation_summary": summary,
+            "approved_brief": request.context.model_dump(mode="json"),
+        }
     if missing:
         return PreparePhoneCallOutput(confirmation_summary=summary, missing_fields=missing)
     plan_id = f"plan_{secrets.token_urlsafe(18)}"
@@ -112,7 +135,9 @@ async def claim_approved_call(
     plan = await db.get_plan_record(plan_id)
     if plan is None:
         raise CallRefusal(ErrorCode.PLAN_NOT_FOUND)
-    if confirmation_text.strip() != confirmation_summary(plan.context):
+    snapshot = await db.control_plan(plan_id)
+    expected = (snapshot or {}).get("confirmation_summary") or confirmation_summary(plan.context)
+    if confirmation_text.strip() != expected:
         raise CallRefusal(ErrorCode.CONFIRMATION_MISMATCH)
     call_id = f"call_{secrets.token_urlsafe(18)}"
     conference_name = f"agent-{secrets.token_hex(16)}"

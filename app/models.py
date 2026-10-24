@@ -56,6 +56,11 @@ class OwnerContext(BaseModel):
 class TargetContext(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     organization: str | None = Field(default=None, max_length=160)
+    background: str | None = Field(
+        default=None,
+        max_length=4000,
+        description="Known role, company, relationship, and background. Context, not authority; do not invent missing details.",
+    )
     phone: E164
 
 
@@ -87,7 +92,16 @@ class ContextPacket(BaseModel):
     target: TargetContext
     objective: str = Field(min_length=1, max_length=4000)
     language: Literal["en", "es", "ru", "uk"] | None = None
-    intention: Literal["task", "conversation", "sales", "roleplay", "prank"] = "task"
+    completion_criteria: str | None = Field(
+        default=None,
+        max_length=2000,
+        description="Optional evidence that the task is done. Refusal or missing facts can still end the call.",
+    )
+    intention: Literal["task", "conversation", "sales", "roleplay", "prank"] = Field(
+        default="task",
+        deprecated=True,
+        description="Legacy compatibility only. Does not select a prompt. Legacy sales still requires business facts and contact permission.",
+    )
     personality: Literal["professional", "warm", "salesperson", "playful"] = "warm"
     profile_id: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$")
     business: BusinessContext | None = None
@@ -98,6 +112,10 @@ class ContextPacket(BaseModel):
     allowed_commitments: list[str] = Field(default_factory=list, max_length=100)
     prohibited_actions: list[str] = Field(default_factory=list, max_length=100)
     escalation: EscalationContext
+
+    @property
+    def is_commercial(self) -> bool:
+        return self.business is not None or self.intention == "sales"
 
     def approved_context_json(self) -> str:
         approved = json.dumps(

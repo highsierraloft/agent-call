@@ -161,6 +161,7 @@ class AndroidVoiceSession:
         callbacks: VoiceCallbacks,
         configuration: dict[str, Any] | None = None,
         browser: bool = False,
+        transport: FastAPIWebsocketTransport | None = None,
     ) -> None:
         if packet.language is None or packet.language not in config.conversation_languages:
             raise ValueError("The initial call language must be enabled")
@@ -180,7 +181,7 @@ class AndroidVoiceSession:
         self._user_speaking = False
         self._assistant_busy = False
         self._playback_active = False
-        self._sales_call = packet.intention == "sales"
+        self._sales_call = packet.is_commercial
         self._destination_suppressed = False
         self._identity_filter = SpeakerIdentityFilter(packet.owner.display_name)
         self._played_response_serial: int | None = None
@@ -192,7 +193,7 @@ class AndroidVoiceSession:
         )
         input_sample_rate = 16000 if browser else 8000
         output_sample_rate = 24000 if browser else 8000
-        transport = FastAPIWebsocketTransport(
+        transport = transport or FastAPIWebsocketTransport(
             websocket=websocket,
             params=FastAPIWebsocketParams(
                 serializer=ProtobufFrameSerializer() if browser else AsteriskFrameSerializer(),

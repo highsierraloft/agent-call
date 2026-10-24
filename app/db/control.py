@@ -107,6 +107,29 @@ class ControlMixin:
                 (entity, current + 1, json.dumps(value, ensure_ascii=False), actor, _iso_now()),
             )
 
+    async def control_migrate(
+        self: DatabaseAccess, changes: list[tuple[str, dict[str, Any], int]]
+    ) -> None:
+        """Save the complete contract migration atomically, with optimistic checks."""
+        async with self._immediate_transaction() as conn:
+            for entity, value, expected in changes:
+                cursor = await conn.execute(
+                    "SELECT MAX(revision) FROM control_revisions WHERE entity=?", (entity,)
+                )
+                row = await cursor.fetchone()
+                if row is None or row[0] != expected:
+                    raise RevisionConflict("Configuration changed during prompt migration")
+                await conn.execute(
+                    "INSERT INTO control_revisions VALUES (?,?,?,?,?)",
+                    (
+                        entity,
+                        expected + 1,
+                        json.dumps(value, ensure_ascii=False),
+                        "prompt contract v2 migration",
+                        _iso_now(),
+                    ),
+                )
+
     async def control_plan(self: DatabaseAccess, plan_id: str) -> dict[str, Any] | None:
         row = await self.fetch_one(
             "SELECT snapshot_json FROM plan_configurations WHERE plan_id=?", (plan_id,)

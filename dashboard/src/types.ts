@@ -22,10 +22,11 @@ export interface Voice {
   max_call_seconds: number;
 }
 export interface Global {
+  prompt_contract_version?: number;
   prompts: {
     conversation: string;
     opening: string;
-    intentions: Record<Intention, string>;
+    intentions?: Record<Intention, string>; // Historical revisions only.
   };
   voice: Voice;
 }
@@ -79,12 +80,18 @@ export interface Status {
 }
 export interface Brief {
   owner: { display_name: string; timezone: string };
-  target: { name: string; phone: string; organization?: string };
+  target: {
+    name: string;
+    phone: string;
+    organization?: string;
+    background?: string;
+  };
   objective: string;
   profile_id?: string;
   personality?: Personality;
   language: Language;
-  intention: Intention;
+  intention?: Intention;
+  completion_criteria?: string;
   max_duration_seconds: number;
   relevant_facts: string[];
   allowed_commitments: string[];
@@ -121,6 +128,7 @@ export interface Turn {
   source_event_type?: string;
 }
 export interface Snapshot {
+  prompt_contract_version?: number;
   effective_prompt?: string;
   profile_id: string;
   profile_name: string;
@@ -228,7 +236,6 @@ export const sampleBrief = (setup: Setup, profileId = "warm"): Brief => ({
     "Have a relaxed conversation. Follow interesting details and answer questions naturally.",
   profile_id: profileId,
   language: "en",
-  intention: "conversation",
   max_duration_seconds: setup.defaults.default_call_seconds,
   relevant_facts: [],
   allowed_commitments: [],

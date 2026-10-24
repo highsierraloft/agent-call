@@ -6,10 +6,10 @@ import pytest
 from pydantic import ValidationError
 
 from app.android_config import AndroidConfig
-from app.call_personalities import personality_instructions
 from app.call_planning import prepare_call
 from app.models import BusinessContext, PreparePhoneCallInput
 from app.policy import validate_destination
+from app.voice_prompts import voice_instructions
 
 
 async def test_sales_preparation_collects_business_facts_before_persisting_plan(settings, packet):
@@ -65,12 +65,13 @@ def test_production_call_budget_is_configurable_and_bounded():
         AndroidConfig(selected_sim_slot=1, caller_number="+12025550199")
 
 
-def test_styles_do_not_expand_authority_and_conversation_allows_fiction(packet):
-    packet.intention = "sales"
+def test_styles_do_not_expand_authority_and_fiction_rules_are_universal(packet):
     packet.personality = "salesperson"
-    sales = personality_instructions(packet)
-    assert "approved claims only" in sales and "Respect a clear no" in sales
-    packet.intention = "conversation"
-    assert "harmless role-play" in personality_instructions(packet)
-    packet.intention = "prank"
-    assert "Never impersonate an authority" in personality_instructions(packet)
+    prompts = []
+    for intention in ["sales", "conversation", "prank"]:
+        packet.intention = intention
+        prompt = voice_instructions(packet)
+        assert "approved claims only" in prompt and "Respect a refusal" in prompt
+        assert "harmless fiction" in prompt and "fictional" in prompt
+        prompts.append(prompt)
+    assert len(set(prompts)) == 1

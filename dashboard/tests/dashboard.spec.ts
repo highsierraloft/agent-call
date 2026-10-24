@@ -40,7 +40,7 @@ test("AI input inspection separates call instructions, runtime tools, and Hermes
     inspector.getByText("google/gemini-3.1-flash-lite", { exact: true }),
   ).toBeVisible();
   await expect(
-    inspector.getByText("Shared conversation instructions", { exact: false }),
+    inspector.getByText("Global Instructions", { exact: false }),
   ).toBeVisible();
   await inspector.getByRole("tab", { name: "Model & Voice" }).click();
   await expect(
@@ -219,9 +219,7 @@ test("new calls require review and start only on the Call action", async ({
   await page.getByRole("button", { name: "New Call", exact: true }).click();
   await page.getByLabel("Recipient", { exact: true }).fill("Casey");
   await page.getByLabel("Phone number").fill("+1 202 555 0111");
-  await page
-    .getByLabel("What should the agent achieve?")
-    .fill("Invite Casey to play chess.");
+  await page.getByLabel("Task").fill("Invite Casey to play chess.");
   await page.getByRole("button", { name: "Review Call", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Review Call" }),
@@ -494,6 +492,7 @@ test("provider dropdowns respect model capabilities and keep reasoning off on mo
 test("named voice and speech choices can be tried directly in Playground without saving", async ({
   page,
 }) => {
+  test.slow(); // WebKit runs this long settings flow under CPU-limited emulation.
   const state = await installFixture(page);
   await page.goto("/playground");
   await page.getByText("Voice and model choices", { exact: true }).click();
@@ -509,9 +508,9 @@ test("named voice and speech choices can be tried directly in Playground without
   await page
     .getByRole("combobox", { name: "Voice model", exact: true })
     .selectOption("inworld-tts-2-flash");
-  await page.getByText("Voice Delivery", { exact: true }).click();
+  await page.getByText("Speech Expression", { exact: true }).click();
   await expect(
-    page.getByRole("combobox", { name: "Delivery", exact: true }),
+    page.getByRole("combobox", { name: "Speech Expression", exact: true }),
   ).toBeDisabled();
   await page
     .getByRole("tablist", { name: "Practice settings" })
@@ -678,5 +677,148 @@ test("call details keep original settings and diagnostics discoverable", async (
   await page.getByRole("tab", { name: "Brief", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Approved brief" }),
+  ).toBeVisible();
+});
+
+test("recipient and dynamic task share the call and practice flow", async ({
+  page,
+}, info) => {
+  const state = await installFixture(page);
+  await page.goto("/playground");
+  await expect(
+    page.getByText("Conversation Purpose", { exact: true }),
+  ).toHaveCount(0);
+  await page.getByLabel("Recipient", { exact: true }).fill("Sam");
+  await page
+    .getByLabel("About this person", { exact: true })
+    .fill("Runs a cafe; met the owner last week.");
+  await page
+    .getByLabel("Task", { exact: true })
+    .fill("Ask about opening on Sunday.");
+  await page.getByText("Task Details", { exact: true }).click();
+  await page
+    .getByLabel("Done when", { exact: true })
+    .fill("The Sunday opening time is confirmed.");
+  await page.getByRole("button", { name: "Text", exact: true }).click();
+  await page.getByRole("button", { name: "Start Text Practice" }).click();
+  expect(state.practiceRequest.context.target.background).toContain(
+    "Runs a cafe",
+  );
+  expect(state.practiceRequest.context.completion_criteria).toContain("Sunday");
+  expect(state.practiceRequest.context.intention).toBeUndefined();
+  await page.screenshot({
+    path: info.outputPath("dynamic-brief.png"),
+    fullPage: true,
+    animations: "disabled",
+  });
+  expect(state.started).toBe(0);
+});
+
+test("an uncertain start recovers the original call after one dial", async ({
+  page,
+}) => {
+  const state = await installFixture(page);
+  state.loseStartResponse = true;
+  await page.goto("/calls");
+  await page.getByRole("button", { name: "New Call", exact: true }).click();
+  await page.getByLabel("Recipient", { exact: true }).fill("Sam");
+  await page.getByLabel("Phone number", { exact: true }).fill("+12025550120");
+  await page.getByLabel("Task", { exact: true }).fill("Ask about Sunday.");
+  await page.getByRole("button", { name: "Review Call", exact: true }).click();
+  await page.getByRole("button", { name: "Call Sam", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "End Call", exact: true }),
+  ).toBeVisible();
+  expect(state.prepared).toBe(1);
+  expect(state.started).toBe(1);
+  expect(
+    await page.evaluate(() => sessionStorage.getItem("calling-pending-start")),
+  ).toBeNull();
+});
+
+test("provider samples load on click, stop on selection changes, and show retry errors", async ({
+  page,
+}) => {
+  const state = await installFixture(page);
+  await page.addInitScript(() => {
+    HTMLMediaElement.prototype.play = async function () {
+      this.dataset.playing = "true";
+    };
+    HTMLMediaElement.prototype.pause = function () {
+      this.dataset.playing = "false";
+    };
+    HTMLMediaElement.prototype.load = function () {};
+    Object.defineProperty(HTMLMediaElement.prototype, "src", {
+      configurable: true,
+      get() {
+        return "";
+      },
+      set() {},
+    });
+  });
+  await page.goto("/personalities");
+  await voiceTab(page);
+  expect(state.previewFetches).toBe(0);
+  const play = page.getByRole("button", { name: "Play Sample", exact: true });
+  await play.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", { name: "Stop Sample" })).toBeVisible();
+  expect(state.previewFetches).toBe(1);
+  await page
+    .getByRole("combobox", { name: "Voice model", exact: true })
+    .selectOption("inworld-tts-2-flash");
+  await expect(play).toBeVisible();
+  state.previewUnavailable = true;
+  await play.click();
+  await expect(page.getByRole("alert")).toContainText("rate limited");
+  await expect(play).toBeVisible();
+  expect(state.started).toBe(0);
+});
+
+test("starting microphone practice stops a provider sample before asking permission", async ({
+  page,
+}) => {
+  await installFixture(page);
+  await page.addInitScript(() => {
+    let playing = false;
+    HTMLMediaElement.prototype.play = async function () {
+      playing = true;
+    };
+    HTMLMediaElement.prototype.pause = function () {
+      playing = false;
+    };
+    HTMLMediaElement.prototype.load = function () {};
+    Object.defineProperty(HTMLMediaElement.prototype, "src", {
+      configurable: true,
+      get() {
+        return "";
+      },
+      set() {},
+    });
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: async () => {
+          (window as any).sampleWasPlayingAtMicRequest = playing;
+          throw new Error("Permission denied");
+        },
+      },
+    });
+  });
+  await page.goto("/playground");
+  await page.getByText("Voice and model choices", { exact: true }).click();
+  await page.getByRole("button", { name: "Play Sample", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Stop Sample", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Start Voice Practice", exact: true })
+    .click();
+  await expect(page.getByRole("alert")).toContainText("Permission denied");
+  expect(
+    await page.evaluate(() => (window as any).sampleWasPlayingAtMicRequest),
+  ).toBe(false);
+  await expect(
+    page.getByRole("button", { name: "Play Sample", exact: true }),
   ).toBeVisible();
 });

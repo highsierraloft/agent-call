@@ -627,8 +627,25 @@ function CallDetail({
           <div className="reading">
             <h3>Approved brief</h3>
             <dl className="facts">
-              <dt>Intention</dt>
-              <dd>{detail.brief.intention}</dd>
+              <dt>Recipient</dt>
+              <dd>{detail.brief.target.name}</dd>
+              <dt>About this person</dt>
+              <dd className="preserve">
+                {detail.brief.target.background || "Not supplied"}
+              </dd>
+              <dt>Task</dt>
+              <dd className="preserve">{detail.brief.objective}</dd>
+              <dt>Done when</dt>
+              <dd className="preserve">
+                {detail.brief.completion_criteria || "Not supplied"}
+              </dd>
+              {detail.configuration?.prompt_contract_version !== 2 &&
+                detail.brief.intention && (
+                  <>
+                    <dt>Legacy purpose</dt>
+                    <dd>{detail.brief.intention}</dd>
+                  </>
+                )}
               <dt>Initial language</dt>
               <dd>{languages[detail.brief.language]}</dd>
               <dt>Duration budget</dt>

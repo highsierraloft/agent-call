@@ -76,8 +76,8 @@ def register_tools(
             "Omit owner.callback_number and escalation.owner_phone: the server fills in the saved owner number. "
             "Only target.phone is the recipient; it can be any valid international destination. Never ask for a masked saved owner number or copy target.phone into owner fields. "
             "Read get_calling_setup first. Supply profile_id to select an available custom profile, or use a built-in personality. "
-            "Set intention=task, conversation, sales, roleplay, or prank; personality=professional, warm, salesperson, or playful. "
-            "For sales, supply business name, description, offer, desired_next_step, and the recipient's actual contact_permission (recipient_requested or prior_consent); never infer consent. Use intention=roleplay for fictional sales practice. "
+            "Set objective to the fresh task; optionally supply target.background and completion_criteria. Personality controls style, not the task. Omit deprecated intention on new requests. "
+            "For a real commercial offer, supply business name, description, offer, desired_next_step, and the recipient's actual contact_permission (recipient_requested or prior_consent); never infer consent. Omit business for clearly fictional practice. "
             "Choose max_duration_seconds for the call or use the deployment default. "
             "Collect missing facts from the owner before calling. Hermes interprets the returned transcript. "
             + CONTEXT_GUIDANCE
@@ -117,7 +117,7 @@ def register_tools(
             "Start the prepared call within the owner's explicit request and approved details. "
             "Copy confirmation_summary exactly into confirmation_text. An explicit owner request to "
             "call with these details is sufficient confirmation; do not ask the same permission twice. "
-            "Wait for terminal state, then retrieve every transcript page. There are no live owner "
+            "If the start response is lost, recover with get_phone_call(plan_id=the original plan ID); never prepare or dial a replacement blindly. Wait for terminal state, then retrieve every transcript page. There are no live owner "
             "transfers or mid-call questions in this backend. " + CONTEXT_GUIDANCE
             if android_backend
             else "Start only a valid, unexpired prepared plan after explicit owner confirmation. "
@@ -224,13 +224,26 @@ def register_tools(
             "idempotentHint": True,
         },
         meta=auth_meta,
-        description="Return lightweight call status and timing fields. " + CONTEXT_GUIDANCE,
+        description="Return lightweight status using exactly one of call_id or plan_id. Recover an uncertain start with the original plan_id: a started plan returns its existing call, an unused plan returns prepared/expired without dialing. "
+        + CONTEXT_GUIDANCE,
     )
-    async def get_phone_call(call_id: str) -> dict[str, Any]:
+    async def get_phone_call(
+        call_id: str | None = None, plan_id: str | None = None
+    ) -> dict[str, Any]:
+        if (call_id is None) == (plan_id is None):
+            raise ToolError("Supply exactly one of call_id or plan_id")
         try:
+            if plan_id is not None:
+                return await get_service().get_plan_status(plan_id)
+            assert call_id is not None
             snapshot = await get_service().get_snapshot(call_id)
         except LookupError as exc:
-            raise ToolError(error_json(ErrorCode.CALL_NOT_FOUND, str(exc))) from exc
+            raise ToolError(
+                error_json(
+                    ErrorCode.PLAN_NOT_FOUND if plan_id is not None else ErrorCode.CALL_NOT_FOUND,
+                    str(exc),
+                )
+            ) from exc
         data = snapshot.model_dump(mode="json", exclude={"result"})
         return data
 

@@ -504,6 +504,15 @@ class AndroidCallService:
         )
         await self.asterisk.close()
 
+    async def get_plan_status(self, plan_id: str) -> dict[str, Any]:
+        from app.call_lookup import lookup_plan
+
+        status = await lookup_plan(self.db, plan_id)
+        if status["call_id"]:
+            snapshot = await self.get_snapshot(status["call_id"])
+            return {**snapshot.model_dump(mode="json", exclude={"result"}), "plan_id": plan_id}
+        return status
+
     async def get_snapshot(self, call_id: str) -> CallSnapshot:
         row = await self.db.get_call(call_id)
         if row is None:

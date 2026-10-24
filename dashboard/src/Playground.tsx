@@ -15,6 +15,8 @@ import {
 import { api, message } from "./api";
 import AIInputs from "./AIInputs";
 import VoiceFields from "./VoiceFields";
+import BriefFields from "./BriefFields";
+import { stopVoicePreview } from "./VoicePreview";
 import { SectionTabs, ActionMenu, SettingsDisclosure } from "./Controls";
 import {
   languages,
@@ -25,7 +27,6 @@ import {
   type Session,
   type Status,
   type Language,
-  type Intention,
   type AIInputInspection,
   type Profile,
   type Revision,
@@ -147,6 +148,7 @@ export default function Playground({
     return Object.keys(value).length ? value : undefined;
   };
   async function start() {
+    stopVoicePreview();
     let connectionTimer: ReturnType<typeof setTimeout> | undefined;
     setError("");
     setBusy(true);
@@ -361,6 +363,7 @@ export default function Playground({
               ))}
             </select>
           </label>
+          <BriefFields brief={brief} onChange={setBrief} />
           <label>
             Initial language
             <select
@@ -379,17 +382,6 @@ export default function Playground({
               ))}
             </select>
           </label>
-          <label>
-            Practice brief
-            <textarea
-              aria-label="Practice brief"
-              rows={3}
-              value={brief.objective}
-              onChange={(e) =>
-                setBrief((b) => ({ ...b, objective: e.target.value }))
-              }
-            />
-          </label>
         </fieldset>
         <div className="practice-actions">
           {running ? (
@@ -400,7 +392,13 @@ export default function Playground({
           ) : (
             <button
               className="primary"
-              disabled={busy || blocked || !settingsReady}
+              disabled={
+                busy ||
+                blocked ||
+                !settingsReady ||
+                !brief.objective.trim() ||
+                !brief.target.name.trim()
+              }
               onClick={start}
             >
               {mode === "voice" ? (
@@ -435,29 +433,6 @@ export default function Playground({
           className="practice-model-settings"
           disabled={running || busy}
         >
-          <SettingsDisclosure
-            title="Conversation Purpose"
-            summary={brief.intention}
-          >
-            <label>
-              Purpose
-              <select
-                value={brief.intention}
-                onChange={(e) =>
-                  setBrief((b) => ({
-                    ...b,
-                    intention: e.target.value as Intention,
-                  }))
-                }
-              >
-                {["conversation", "task", "roleplay", "prank", "sales"].map(
-                  (v) => (
-                    <option key={v}>{v}</option>
-                  ),
-                )}
-              </select>
-            </label>
-          </SettingsDisclosure>
           <SettingsDisclosure
             title="Voice and model choices"
             summary="Temporary choices for this session"

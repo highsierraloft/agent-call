@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import VoicePreview from "./VoicePreview";
 import { api, message } from "./api";
 import { SettingsDisclosure } from "./Controls";
 import { languages, type Language, type Voice } from "./types";
@@ -442,21 +443,28 @@ export default function VoiceFields({
               {reset("inworld_model")}
             </label>
           </div>
+          <VoicePreview
+            voice={effective.inworld_voice}
+            model={effective.inworld_model}
+          />
           <SettingsDisclosure
-            title="Voice Delivery"
+            title="Speech Expression"
             summary={
               supportsDelivery
                 ? effective.inworld_delivery_mode === "CREATIVE"
                   ? "Expressive"
-                  : effective.inworld_delivery_mode?.toLowerCase() ||
-                    "Provider default"
+                  : (effective.inworld_delivery_mode === "STABLE"
+                      ? "Consistent"
+                      : effective.inworld_delivery_mode === "BALANCED"
+                        ? "Balanced"
+                        : null) || "Provider default"
                 : "Automatic for TTS-2 Flash"
             }
           >
             <label>
-              Delivery
+              Speech Expression
               <select
-                aria-label="Delivery"
+                aria-label="Speech Expression"
                 disabled={!supportsDelivery}
                 value={effective.inworld_delivery_mode || ""}
                 onChange={(e) =>
@@ -464,15 +472,16 @@ export default function VoiceFields({
                 }
               >
                 <option value="">Provider default</option>
-                <option value="STABLE">Stable</option>
+                <option value="STABLE">Consistent</option>
                 <option value="BALANCED">Balanced</option>
                 <option value="CREATIVE">Expressive</option>
               </select>
               {reset("inworld_delivery_mode")}
+              <small>Changes audio variation and emotional range.</small>
               {!supportsDelivery && (
                 <small>
-                  TTS-2 Flash does not apply delivery modes. Your TTS-2
-                  preference is retained.
+                  TTS-2 Flash ignores Speech Expression. Your TTS-2 preference
+                  is retained.
                 </small>
               )}
             </label>

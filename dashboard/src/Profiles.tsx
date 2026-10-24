@@ -629,10 +629,10 @@ function GlobalFields({
       <section className="form-section">
         <p className="section-intro muted">
           The call AI combines these instructions with the chosen personality
-          and call brief.
+          recipient, and task.
         </p>
         <label>
-          How the agent talks
+          Global Instructions
           <textarea
             rows={8}
             value={value.prompts.conversation}
@@ -657,30 +657,6 @@ function GlobalFields({
             }
           />
         </label>
-        <details>
-          <summary>Purpose-specific prompts</summary>
-          {Object.entries(value.prompts.intentions).map(([k, text]) => (
-            <label key={k}>
-              {k[0].toUpperCase() + k.slice(1)}
-              <textarea
-                rows={6}
-                value={text}
-                onChange={(e) =>
-                  onChange({
-                    ...value,
-                    prompts: {
-                      ...value.prompts,
-                      intentions: {
-                        ...value.prompts.intentions,
-                        [k]: e.target.value,
-                      },
-                    },
-                  })
-                }
-              />
-            </label>
-          ))}
-        </details>
       </section>
     </>
   );

@@ -26,6 +26,7 @@ from app.errors import CallRefusal
 from app.model_capabilities import validate_reasoning
 from app.models import ContextPacket
 from app.voice_catalog import VoiceCatalog
+from app.voice_preview import VoicePreviews
 from app.voice_prompts import voice_instructions
 
 if TYPE_CHECKING:
@@ -41,6 +42,7 @@ class ControlPlane:
         self._seeded = False
         self.practice = Playground(self)
         self.catalog = VoiceCatalog(service.config, service._api_key)
+        self.voice_previews = VoicePreviews(self.catalog)
 
     async def initialize(self) -> None:
         async with self._seed_lock:
@@ -67,6 +69,9 @@ class ControlPlane:
                     }
                 )
                 await self.db.control_seed("profile:" + name, value.model_dump(mode="json"))
+            from app.control_migration import migrate_contract
+
+            await migrate_contract(self.db)
             self._seeded = True
 
     async def current(self, entity: str) -> dict[str, Any]:
@@ -156,6 +161,7 @@ class ControlPlane:
                 "language_required", "The initial language must be enabled in this profile"
             )
         return {
+            "prompt_contract_version": 2,
             "profile_id": profile_record["entity"].removeprefix("profile:"),
             "profile_revision": profile_record["revision"],
             "configuration_revision": global_record["revision"],
@@ -181,6 +187,7 @@ class ControlPlane:
     def freeze_inputs(
         self, packet: ContextPacket, snapshot: dict[str, Any], mode: Mode = "voice"
     ) -> None:
+        snapshot["approved_brief"] = packet.model_dump(mode="json")
         snapshot["effective_prompt"] = self.prompt(packet, snapshot)
         snapshot["ai_inputs"] = describe_inputs(
             packet, snapshot, self.runtime_config(snapshot), mode
@@ -210,7 +217,14 @@ class ControlPlane:
             return None
         return {
             key: snapshot[key]
-            for key in ["profile_id", "profile_revision", "configuration_revision", "profile_name"]
+            for key in [
+                "profile_id",
+                "profile_revision",
+                "configuration_revision",
+                "profile_name",
+                "prompt_contract_version",
+            ]
+            if key in snapshot
         }
 
     def runtime_config(self, snapshot: dict[str, Any] | None) -> AndroidConfig:
@@ -236,7 +250,6 @@ class ControlPlane:
             conversation_languages=snapshot["voice"]["conversation_languages"],
             prompts=snapshot["prompts"],
             personality_prompt=snapshot["personality_prompt"],
-            intention_prompts=snapshot["prompts"]["intentions"],
         )
 
     async def setup(self, *, from_mcp: bool = False) -> dict[str, Any]:

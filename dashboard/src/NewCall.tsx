@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Phone, X, ChevronLeft } from "lucide-react";
 import { api, message, ApiError } from "./api";
+import BriefFields from "./BriefFields";
 import { SettingsDisclosure } from "./Controls";
 import {
   languages,
   sampleBrief,
   type Brief,
   type Session,
-  type Intention,
   type Language,
 } from "./types";
 
@@ -27,6 +27,7 @@ export default function NewCall({
     initial
       ? {
           ...initial,
+          intention: undefined,
           owner: session.setup.owner,
           escalation: { mode: "end_call" },
         }
@@ -34,7 +35,6 @@ export default function NewCall({
           ...sampleBrief(session.setup),
           target: { name: "", phone: "" },
           objective: "",
-          intention: "task",
         },
   );
   const [prepared, setPrepared] = useState<{
@@ -46,7 +46,48 @@ export default function NewCall({
     [uncertain, setUncertain] = useState(false);
   useEffect(() => {
     dialog.current?.showModal();
+    try {
+      const saved = sessionStorage.getItem("calling-pending-start");
+      if (saved) {
+        const plan = JSON.parse(saved);
+        setPrepared(plan);
+        setUncertain(true);
+        void recover(plan.plan_id);
+      }
+    } catch {
+      /* A missing browser storage entry does not start a new call. */
+    }
   }, []);
+  async function recover(planId = prepared?.plan_id) {
+    if (!planId) return;
+    setBusy(true);
+    try {
+      const status = await api<{ call_id: string | null; state: string }>(
+        "/plans/" + encodeURIComponent(planId),
+      );
+      if (status.call_id) {
+        sessionStorage.removeItem("calling-pending-start");
+        onStarted(status.call_id);
+      } else if (status.state === "expired") {
+        sessionStorage.removeItem("calling-pending-start");
+        setUncertain(false);
+        setPrepared(null);
+        setError(
+          "The original plan expired without starting a call. Review the brief again.",
+        );
+      } else {
+        setUncertain(true);
+        setError(
+          "The original plan has not started yet. Check again, or retry this same plan safely.",
+        );
+      }
+    } catch (e) {
+      setUncertain(true);
+      setError(message(e));
+    } finally {
+      setBusy(false);
+    }
+  }
   const update = <K extends keyof Brief>(key: K, value: Brief[K]) =>
     setBrief((v) => ({ ...v, [key]: value }));
   async function prepare(e: React.FormEvent) {
@@ -88,17 +129,21 @@ export default function NewCall({
     setBusy(true);
     setError("");
     try {
+      sessionStorage.setItem("calling-pending-start", JSON.stringify(prepared));
       const r = await api<{ call_id: string }>("/calls/start", "POST", {
         ...prepared,
         confirmation_text: prepared.confirmation_summary,
         confirmation_summary: undefined,
         explicit_confirmation: true,
       });
+      sessionStorage.removeItem("calling-pending-start");
       onStarted(r.call_id);
     } catch (e) {
       setError(message(e));
-      if (e instanceof TypeError || (e instanceof ApiError && e.status >= 500))
+      if (e instanceof TypeError || e instanceof ApiError) {
         setUncertain(true);
+        await recover();
+      }
     } finally {
       setBusy(false);
     }
@@ -132,8 +177,7 @@ export default function NewCall({
       {error && (
         <p className="error" role="alert">
           {error}
-          {uncertain &&
-            " The start result is uncertain. Check Calls before trying again."}
+          {uncertain && " Use Check Status to recover the original call."}
         </p>
       )}
       {prepared ? (
@@ -144,6 +188,11 @@ export default function NewCall({
             preparation.
           </p>
           <footer>
+            {uncertain && (
+              <button onClick={() => recover()} disabled={busy}>
+                Check Status
+              </button>
+            )}
             <button
               onClick={() => setPrepared(null)}
               disabled={busy || uncertain}
@@ -151,87 +200,36 @@ export default function NewCall({
               <ChevronLeft size={16} />
               Edit Brief
             </button>
-            <button
-              className="primary"
-              onClick={start}
-              disabled={busy || uncertain}
-            >
+            <button className="primary" onClick={start} disabled={busy}>
               <Phone size={16} />
-              {busy ? "Starting…" : "Call " + brief.target.name}
+              {busy
+                ? "Checking…"
+                : uncertain
+                  ? "Retry Same Plan"
+                  : "Call " + brief.target.name}
             </button>
           </footer>
         </>
       ) : (
         <form onSubmit={prepare}>
-          <div className="two-fields">
-            <label>
-              Recipient
-              <input
-                required
-                autoFocus
-                value={brief.target.name}
-                onChange={(e) =>
-                  update("target", { ...brief.target, name: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              Phone number
-              <input
-                required
-                type="tel"
-                placeholder="+34 …"
-                value={brief.target.phone}
-                onChange={(e) =>
-                  update("target", { ...brief.target, phone: e.target.value })
-                }
-              />
-              <small>Include the country code.</small>
-            </label>
-          </div>
           <label>
-            What should the agent achieve?
-            <textarea
-              required
-              rows={3}
-              value={brief.objective}
-              onChange={(e) => update("objective", e.target.value)}
-            />
+            Personality
+            <select
+              value={brief.profile_id || brief.personality || "warm"}
+              onChange={(e) => update("profile_id", e.target.value)}
+            >
+              {session.setup.profiles.map((p) => (
+                <option value={p.id} key={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
           </label>
+          <BriefFields brief={brief} onChange={setBrief} phone />
           <SettingsDisclosure
             title="Call Settings"
             summary={`${session.setup.profiles.find((p) => p.id === brief.profile_id)?.name || "Warm"} · ${languages[brief.language]} · ${brief.max_duration_seconds / 60} min`}
           >
-            <div className="two-fields">
-              <label>
-                Personality
-                <select
-                  value={brief.profile_id || brief.personality || "warm"}
-                  onChange={(e) => update("profile_id", e.target.value)}
-                >
-                  {session.setup.profiles.map((p) => (
-                    <option value={p.id} key={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Purpose
-                <select
-                  value={brief.intention}
-                  onChange={(e) =>
-                    update("intention", e.target.value as Intention)
-                  }
-                >
-                  {["task", "conversation", "sales", "roleplay", "prank"].map(
-                    (v) => (
-                      <option key={v}>{v}</option>
-                    ),
-                  )}
-                </select>
-              </label>
-            </div>
             <div className="two-fields">
               <label>
                 Initial language
@@ -263,82 +261,6 @@ export default function NewCall({
               </label>
             </div>
           </SettingsDisclosure>
-          <details>
-            <summary>Facts and limits</summary>
-            {(
-              [
-                "relevant_facts",
-                "allowed_commitments",
-                "hard_constraints",
-              ] as const
-            ).map((key) => (
-              <label key={key}>
-                {
-                  {
-                    relevant_facts: "Relevant facts",
-                    allowed_commitments: "Allowed commitments",
-                    hard_constraints: "Limits",
-                  }[key]
-                }
-                <textarea
-                  rows={3}
-                  value={brief[key].join("\n")}
-                  onChange={(e) => update(key, e.target.value.split("\n"))}
-                />
-                <small>One item per line.</small>
-              </label>
-            ))}
-          </details>
-          {brief.intention === "sales" && (
-            <fieldset>
-              <legend>Commercial offer</legend>
-              {(
-                ["name", "description", "offer", "desired_next_step"] as const
-              ).map((key) => (
-                <label key={key}>
-                  {key.replaceAll("_", " ")}
-                  <input
-                    required
-                    value={brief.business?.[key] || ""}
-                    onChange={(e) =>
-                      update("business", {
-                        name: "",
-                        description: "",
-                        offer: "",
-                        desired_next_step: "",
-                        contact_permission: "",
-                        ...brief.business,
-                        [key]: e.target.value,
-                      })
-                    }
-                  />
-                </label>
-              ))}
-              <label>
-                Contact permission
-                <select
-                  required
-                  value={brief.business?.contact_permission || ""}
-                  onChange={(e) =>
-                    update("business", {
-                      name: "",
-                      description: "",
-                      offer: "",
-                      desired_next_step: "",
-                      ...brief.business,
-                      contact_permission: e.target.value,
-                    })
-                  }
-                >
-                  <option value="">Choose the actual permission</option>
-                  <option value="recipient_requested">
-                    Recipient requested contact
-                  </option>
-                  <option value="prior_consent">Prior consent</option>
-                </select>
-              </label>
-            </fieldset>
-          )}
           <footer>
             <button type="button" onClick={onClose}>
               Cancel

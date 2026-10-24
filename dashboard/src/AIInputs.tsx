@@ -150,7 +150,7 @@ export default function AIInputs({
                       </span>
                     </summary>
                     <pre tabIndex={0}>
-                      {part.text || "No additional text for this purpose."}
+                      {part.text || "No additional instructions."}
                     </pre>
                   </details>
                 </li>

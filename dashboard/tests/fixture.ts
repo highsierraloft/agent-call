@@ -20,17 +20,11 @@ export const voice = {
   max_call_seconds: 7200,
 };
 export const globals = {
+  prompt_contract_version: 2,
   voice,
   prompts: {
     conversation: "Speak naturally and leave room for the other person.",
     opening: "Give a short greeting and explain the purpose.",
-    intentions: {
-      task: "Complete the approved task.",
-      conversation: "Follow the conversation.",
-      sales: "Use only approved business facts.",
-      roleplay: "Keep the fictional premise clear.",
-      prank: "Keep it harmless and playful.",
-    },
   },
 };
 export const profile = (name = "Warm") => ({
@@ -75,6 +69,9 @@ export async function installFixture(page: Page) {
     records,
     histories,
     prepared: 0,
+    loseStartResponse: false,
+    previewFetches: 0,
+    previewUnavailable: false,
     started: 0,
     ended: 0,
     paginate: false,
@@ -136,7 +133,7 @@ export async function installFixture(page: Page) {
       prompt_sections: [
         {
           id: "global",
-          label: "Shared conversation instructions",
+          label: "Global Instructions",
           source: "Global Defaults",
           editable: true,
           text: globals.prompts.conversation,
@@ -150,8 +147,8 @@ export async function installFixture(page: Page) {
         },
         {
           id: "personality",
-          label: "Personality and purpose",
-          source: "Selected personality + Global Defaults",
+          label: "Personality",
+          source: "Selected personality",
           editable: true,
           text: prompt,
         },
@@ -472,9 +469,30 @@ export async function installFixture(page: Page) {
         missing_fields: [],
       });
     }
+    if (path === "/voice-preview") {
+      state.previewFetches++;
+      return state.previewUnavailable
+        ? route.fulfill({
+            status: 429,
+            json: {
+              detail: "Provider samples are rate limited. Try again shortly.",
+            },
+          })
+        : route.fulfill({
+            contentType: "audio/mpeg",
+            body: Buffer.from("ID3sample"),
+          });
+    }
+    if (path.startsWith("/plans/"))
+      return respond({
+        plan_id: "plan_local_test",
+        call_id: state.active,
+        state: state.active ? "active" : "prepared",
+      });
     if (path === "/calls/start") {
       state.started++;
       state.active = "call_started";
+      if (state.loseStartResponse) return route.abort("failed");
       return respond({ call_id: state.active, state: "active" });
     }
     if (path.startsWith("/calls/")) {

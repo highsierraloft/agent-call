@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from types import SimpleNamespace
 
@@ -29,15 +28,12 @@ android = phone_tests.android
 panel = control_tests.panel
 
 
-def test_prompt_sections_preserve_the_deployed_prompt_byte_for_byte(packet):
+def test_prompt_sections_match_the_new_executed_contract(packet):
     packet = packet.model_copy(update={"language": "en"})
     prompt = voice_instructions(packet, conversation_languages=["en", "es", "ru", "uk"])
-    assert (
-        hashlib.sha256(prompt.encode()).hexdigest()
-        == "e6b11edc111d730a49d6d401993621b57728e36ded9c6bcb5719d2cf91063eaa"
-    )
     parts = voice_prompt_sections(packet, conversation_languages=["en", "es", "ru", "uk"])
     assert "".join(part["text"] for part in parts) == prompt
+    assert {part["id"] for part in parts} >= {"recipient", "task", "personality", "authority"}
     assert {part["source"] for part in parts} >= {
         "Global Defaults",
         "Runtime rules",

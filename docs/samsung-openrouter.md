@@ -45,7 +45,7 @@ served by `Dockerfile.control`. Administration APIs remain inside the existing F
 The interface uses the same four work areas throughout: Calls, Personalities, Playground, and Hermes.
 Personalities separates Instructions, Voice & Model, and Call Settings. The selected section preserves
 unsaved edits. Save and Try in Playground stay visible; More contains the full-text editor, history,
-and duplication. Response controls, delivery options, and turn timing use labelled disclosures with
+and duplication. Response controls, Speech Expression, and turn timing use labelled disclosures with
 current-value summaries. On narrow screens, a profile picker replaces the library list.
 
 Playground keeps Start/End Practice above optional settings and fixes these controls to the bottom
@@ -116,6 +116,14 @@ Inworld TTS-2 or TTS-2 Flash, and compatible Soniox real-time models. Search voi
 language, or description. Soniox aliases are labelled with their underlying engine; async models
 are excluded. The current provider accounts remain in use. No new credentials are required.
 
+
+**Play Sample** loads an unbilled Inworld provider sample only after a click. The authenticated
+`GET /admin/api/voice-preview?voice=...&model=...` keeps credentials on the server. Requests are
+serialized; the memory cache expires after 24 hours and holds at most 32 MiB. Rate limits and
+unavailable voices have explicit errors. There is no fallback to paid synthesis. Only one sample
+plays at a time, and starting microphone practice stops it. Provider-selected text does not
+represent the task, personality, or Speech Expression. See the [preview API](https://docs.inworld.ai/api-reference/voiceAPI/voiceservice/get-voice-preview).
+
 The server fetches provider catalogs and caches each list independently for one hour. Model choices
 require tools and tool-choice support; temperature support is not required. This includes GPT-6 Luna,
 Claude Haiku 5.5, and supported Gemini alternatives. Listed prices come from OpenRouter's catalog;
@@ -131,7 +139,8 @@ an explicit warning; saving or practice fails until the owner chooses a supporte
 default is a separate, explicit choice and can enable thinking. Temperature can be disabled; unsupported
 temperature and reasoning fields are omitted from the actual requests. The maximum output-token
 budget is editable from 64 to 16384, including any reasoning tokens; the unchanged default is 512.
-TTS-2 Flash does not apply delivery modes, so that control is disabled while the TTS-2 preference is retained.
+Speech Expression offers Consistent (`STABLE`), Balanced (`BALANCED`), and Expressive (`CREATIVE`).
+It changes audio variation and emotional range. Flash ignores it, so the control is disabled while its saved value is retained.
 
 Playground's **Voice and model choices** apply temporary session overrides without saving a revision.
 They take precedence over the selected personality and any unsaved editor draft. Inspect AI Inputs
@@ -162,9 +171,39 @@ These are small samples, not latency percentiles. The earlier telephone-transpor
 1.082–1.262 seconds. Different transports, input samples, and provider timing prevent a direct regression claim.
 Explicit stop and tab closure both released practice capacity. Native Hermes model discovery,
 authenticated MP3 seeking, Markdown delivery, and the live voice/model catalogs passed without dialing.
-The input-inspection update preserves the prior system prompt byte-for-byte. A provider-backed browser
+The earlier input-inspection update preserved its prior system prompt byte-for-byte; contract v2 intentionally changes new calls only. A provider-backed browser
 check captured the outgoing Gemini 3.1 Flash-Lite request, its runtime timer and `finish_call` definition,
 then released practice capacity. It placed no telephone call and did not change saved configurations.
+
+### Conversation regression checks
+
+`scripts/eval_dynamic_tasks.py` uses the pinned Pipecat Evals library and the shared production
+voice pipeline through its maintained evaluation transport. Synthetic briefs are in
+`tests/scenarios/dynamic-tasks.yaml`. The harness binds an ephemeral loopback port and has no
+telephone or Asterisk connection. Its judge runs only during diagnostics, using the existing
+OpenRouter account. It does not add a production summarizer or a long-running service.
+
+Run in an isolated, short-lived container with read-only source and provider-key mounts:
+`python -m scripts.eval_dynamic_tasks --output /evidence`. The private configuration is read from
+`/run/secrets/agent-call.json`; `--only` selects comma-separated scenario names. Save evidence in
+private storage. Text scenarios test behavior, not speech recognition or audible latency.
+Use the bounded paced-audio replay separately. Keep real-handset listening owner-initiated.
+
+The backend suite passed 993 tests with two skips and 89.18% coverage; focused final-contract checks also passed.
+All 84 browser checks passed across Chromium, dark appearance, desktop WebKit, and phone WebKit.
+Twelve live-provider Pipecat scenarios passed, including both style variants and the approved callback policy.
+The evaluation judge uses GPT-6 Luna through OpenRouter only during diagnostics.
+
+The v2 audio comparison used the same five synthetic inputs through the telephone transport.
+The prior release measured 0.992–1.585 seconds; v2 measured 1.119–1.495 seconds from input speech
+end to received output audio. All turns met the two-second replay target. Both runs completed
+language switches, interruptions, and closing. These small samples are not latency percentiles
+or a real-phone guarantee. No configuration reads or preview requests were added to the audio loop.
+
+Rollback must preserve newer calls and snapshots. A prior worker cannot start a v2 plan with its
+new confirmation text. Preserve those plans and let them expire; never bypass confirmation or
+replace them with an automatic dial. Restore matching configuration/Compose while idle and
+verify the contract before accepting further preparations.
 
 ## Results and limitations
 
@@ -237,27 +276,51 @@ The pinned Hermes runtime recognizes the `_poll` naming convention as repeatable
 Keep other loop protections enabled. The deployment sets Hermes's supported `agent.max_turns` to 500 and this MCP server's timeout to 90 seconds.
 That leaves room for a two-hour call, result pagination, and file conversion. The default 60 turns could stop monitoring too early.
 
-## Intentions and personalities
+## Dynamic tasks and recipient context
 
-The call brief has separate `intention` and `personality` fields. Style never expands the owner's authority.
+New calls use Global Instructions, Opening Instructions, Personality, Recipient, and Task.
+Service rules separately govern identity, authority, languages, interruptions, and closing.
+Personality sets style. The task takes precedence over style; recipient information grants no authority.
+No category selects a hidden purpose prompt. No classifier, planner, or summary model was added.
 
-| Field | Choices |
+New Call and Playground use Personality → Recipient → Task. Only a telephone call needs a number.
+The shared neutral instructions avoid forced fillers, repeated acknowledgments, and mandatory questions.
+
+| Field | Meaning |
 | --- | --- |
-| `intention` | `task`, `conversation`, `sales`, `roleplay`, `prank` |
-| `personality` | `professional`, `warm`, `salesperson`, `playful` |
-| `max_duration_seconds` | Optional per-call budget, from 30 to 7,200 seconds, within the deployment ceiling |
+| `profile_id` / `personality` | Saved style, including the four compatible built-in names |
+| `target.name` | Recipient name |
+| `target.background` | Optional known role, company, relationship, and background; never invented |
+| `objective` | Fresh free-text task |
+| `completion_criteria` | Optional **Done when**, under Task Details |
+| `business` | Commercial offer facts and contact permission, independent of style |
+| `max_duration_seconds` | Optional budget, from 30 to 7,200 seconds within the deployment ceiling |
 
-For `sales`, `business` must include `name`, `description`, `offer`, `desired_next_step`, and `contact_permission`.
-The last field is `recipient_requested` or `prior_consent`; Hermes must obtain the actual fact, never infer it.
-Optional business fields are `audience`, `approved_claims`, and `pricing`.
-Preparation returns missing fields before creating a plan. The confirmation binds the intention, personality, and duration.
-For fictional sales practice, use `intention=roleplay` with `personality=salesperson`.
+A refusal, missing information, technical failure, or time limit may end an unfinished task.
+Hermes assesses completion from transcript evidence; a completed call does not prove task success.
+Routine callbacks on the same task are allowed unless the brief prohibits follow-up. The agent
+may promise to check and call back, but cannot invent a time or claim it is already scheduled.
+Hermes reports callback commitments as outstanding actions from the transcript. This release
+does not add an automatic callback scheduler. Explicit spending, booking, and other limits remain binding.
+For commercial offers, `business` must include `name`, `description`, `offer`, `desired_next_step`,
+and actual `contact_permission` (`recipient_requested` or `prior_consent`). Optional fields include
+`audience`, `approved_claims`, and `pricing`. Fictional practice and personal invitations omit business.
+Legacy `intention` values remain accepted but do not select prompts. Legacy `sales` still requires
+these business fields. New clients omit `intention`. There is no task library or contact database.
 
-The sales prompt uses a concise reason for calling, a relevant benefit, listening, a clarifying question for ambiguous objections,
-and one approved next step. It prohibits invented claims, prices, relationships, and pressure after a clear refusal.
-This is an original synthesis of [Gong's cold-calling guidance](https://www.gong.io/blog/cold-calling-tips)
-and [Salesforce's prospecting guidance](https://trailhead.salesforce.com/content/learn/modules/cold-calling-for-sales/start-cold-calling-prospects).
-Vendor research informs the prompt; it does not establish this agent's sales effectiveness.
+Prompt contract v2 freezes the approved brief, recipient background, completion criteria, resolved
+prompt, voice/model settings, profile revisions, and exact confirmation summary when preparing.
+Old prepared plans keep the original confirmation format. Existing snapshots and revision history
+are unchanged. An atomic migration replaces only unchanged seed instructions and the seed guide;
+custom instructions remain intact. Restoring an old global revision drops retired purpose fields
+and creates a new revision. It never makes retired purpose prompts active again.
+
+After an uncertain start, call `get_phone_call(plan_id=original_plan_id)`; supply exactly one of
+`call_id` or `plan_id`. A started plan returns its existing call status. An unused plan returns
+`prepared` or `expired` and no call ID. This lookup never dials. Dashboard recovery uses
+`GET /admin/api/plans/{plan_id}` and retains pending starts across page reloads. A retry uses the
+same single-use plan, not a newly prepared call. Guide reads remain live through `get_calling_setup`.
+Tool schema changes require one Hermes discovery refresh; later guide edits require no restart.
 
 Conversation and role-play can include clearly fictional stories and harmless persona changes.
 Prank calls must remain light and clearly playful, reveal the joke when asked, and stop if unwelcome.

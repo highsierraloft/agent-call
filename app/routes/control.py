@@ -19,6 +19,7 @@ from app.control_auth import (
 from app.control_models import CallAnnotation, RevisionSave
 from app.db.control import RevisionConflict
 from app.models import ContextPacket, PreparePhoneCallInput
+from app.voice_preview import PreviewUnavailable
 
 router = APIRouter(prefix="/admin/api", tags=["control"])
 
@@ -72,6 +73,27 @@ async def status(control: ControlPlane = Depends(require_control)) -> dict[str, 
 @router.get("/catalog")
 async def catalog(control: ControlPlane = Depends(require_control)) -> dict[str, Any]:
     return await control.catalog.get()
+
+
+@router.get("/voice-preview")
+async def voice_preview(
+    voice: str = Query(min_length=1, max_length=100),
+    model: str = Query(min_length=1, max_length=100),
+    control: ControlPlane = Depends(require_control),
+) -> Response:
+    try:
+        data = await control.voice_previews.get(voice, model)
+    except PreviewUnavailable as exc:
+        raise HTTPException(
+            exc.status,
+            str(exc),
+            headers={"Retry-After": str(exc.retry_after)} if exc.retry_after else None,
+        ) from exc
+    return Response(
+        data,
+        media_type="audio/mpeg",
+        headers={"Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.get("/profiles")
@@ -159,6 +181,16 @@ async def calls(
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+
+
+@router.get("/plans/{plan_id}")
+async def plan_status(
+    plan_id: str, control: ControlPlane = Depends(require_control)
+) -> dict[str, Any]:
+    try:
+        return await control.service.get_plan_status(plan_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 @router.get("/calls/{call_id}")

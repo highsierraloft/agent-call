@@ -110,7 +110,6 @@ def describe_inputs(
         conversation_languages=list(config.conversation_languages),
         prompts=snapshot["prompts"],
         personality_prompt=snapshot["personality_prompt"],
-        intention_prompts=snapshot["prompts"]["intentions"],
     )
     prompt = snapshot["effective_prompt"]
     options = model_options(config, mode)
