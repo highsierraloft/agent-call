@@ -31,3 +31,8 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Dashboard build and browser test output
+dashboard/node_modules/
+dashboard/playwright-report/
+dashboard/test-results/

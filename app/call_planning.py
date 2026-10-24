@@ -5,6 +5,7 @@ from __future__ import annotations
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from app.db import ClaimOutcome, Database, DeploymentLockedError
 from app.errors import CallRefusal, ErrorCode
@@ -20,6 +21,7 @@ def confirmation_summary(packet: ContextPacket) -> str:
         f"{f' at {target.organization}' if target.organization else ''} "
         f"on {target.phone} to: {packet.objective}. "
         f"Intention: {packet.intention}; personality: {packet.personality}. "
+        + (f"Profile: {packet.profile_id}. " if packet.profile_id else "")
         + (
             f"Duration budget: {packet.max_duration_seconds} seconds. "
             if packet.max_duration_seconds
@@ -31,7 +33,11 @@ def confirmation_summary(packet: ContextPacket) -> str:
 
 
 async def prepare_call(
-    settings: Settings, db: Database, request: PreparePhoneCallInput
+    settings: Settings,
+    db: Database,
+    request: PreparePhoneCallInput,
+    *,
+    configuration_snapshot: dict[str, Any] | None = None,
 ) -> PreparePhoneCallOutput:
     packet = request.context
     if "configured" in (packet.owner.callback_number, packet.escalation.owner_phone):
@@ -69,8 +75,17 @@ async def prepare_call(
         return PreparePhoneCallOutput(confirmation_summary=summary, missing_fields=missing)
     plan_id = f"plan_{secrets.token_urlsafe(18)}"
     expires_at = datetime.now(UTC) + timedelta(seconds=settings.plan_ttl_seconds)
+    snapshot_args = (
+        {"configuration_snapshot": configuration_snapshot}
+        if configuration_snapshot is not None
+        else {}
+    )
     await db.create_plan(
-        plan_id, request.context.model_dump(mode="json"), request.authority_basis, expires_at
+        plan_id,
+        request.context.model_dump(mode="json"),
+        request.authority_basis,
+        expires_at,
+        **snapshot_args,
     )
     return PreparePhoneCallOutput(
         plan_id=plan_id, confirmation_summary=summary, missing_fields=[], expires_at=expires_at

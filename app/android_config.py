@@ -38,6 +38,8 @@ class AndroidConfig(BaseModel):
     soniox_endpoint_latency_level: int = Field(default=2, ge=0, le=3)
     soniox_endpoint_sensitivity: float = Field(default=0.3, ge=-1, le=1)
     stt_model: str = "deepgram/nova-3"
+    dashboard_config_file: Path | None = None
+    dialogue_temperature: float = Field(default=0.4, ge=0, le=2)
     dialogue_model: str = "google/gemini-3.1-flash-lite"
     dialogue_provider: str | None = Field(default=None, min_length=1)
     dialogue_fallback_providers: list[str] = Field(default_factory=list, max_length=4)

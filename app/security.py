@@ -33,6 +33,8 @@ class WebhookBodyLimitMiddleware:
             return OPENAI_WEBHOOK_BODY_MAX_BYTES
         if path.startswith("/webhooks/twilio/"):
             return TWILIO_WEBHOOK_BODY_MAX_BYTES
+        if path.startswith("/admin/api/"):
+            return 131072
         if path == "/oauth/consent":
             return MCP_OAUTH_CONSENT_BODY_MAX_BYTES
         if path == "/register":

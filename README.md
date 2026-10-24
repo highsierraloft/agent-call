@@ -2,8 +2,11 @@
 
 # Agent Call
 
-This fork adds Samsung SIM calling with streaming voice, selectable call profiles, and
-MP3/Markdown results through MCP. Automated integration checks pass; post-hardening
+This fork adds Samsung SIM calling, a private control panel, versioned personalities,
+browser voice practice, and MP3/Markdown results through MCP. The panel can start and stop
+calls, search transcripts, play recordings, and edit the guide Hermes reads before calling.
+See the [control panel setup](docs/samsung-openrouter.md#private-control-panel).
+Automated integration checks pass; post-hardening
 handset validation remains open. The existing upstream live path described below requires
 OpenAI and Twilio. See the [fork status and acceptance checks](docs/samsung-openrouter.md).
 

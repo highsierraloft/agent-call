@@ -46,6 +46,22 @@ def register_tools(
         {"securitySchemes": [{"type": "oauth2", "scopes": [MCP_OAUTH_SCOPE]}]} if oauth else None
     )
 
+    if android_backend:
+
+        @mcp.tool(
+            name="get_calling_setup",
+            description="Read the current owner-authored calling guide, available profiles, languages, and defaults before preparing a call. Profile IDs remain valid across prompt edits. This does not dial.",
+            annotations={"readOnlyHint": True, "openWorldHint": False},
+            meta=auth_meta,
+        )
+        async def get_calling_setup() -> dict[str, Any]:
+            service = get_service()
+            method = getattr(service, "get_calling_setup", None)
+            if method is None:
+                raise ToolError("Calling setup is unavailable")
+            result: dict[str, Any] = await method()
+            return result
+
     @mcp.tool(
         name="prepare_phone_call",
         annotations={
@@ -59,6 +75,7 @@ def register_tools(
             "Prepare a call brief without dialing. Specify the initial language as en, es, ru, or uk, and escalation.mode=end_call. "
             "Omit owner.callback_number and escalation.owner_phone: the server fills in the saved owner number. "
             "Only target.phone is the recipient; it can be any valid international destination. Never ask for a masked saved owner number or copy target.phone into owner fields. "
+            "Read get_calling_setup first. Supply profile_id to select an available custom profile, or use a built-in personality. "
             "Set intention=task, conversation, sales, roleplay, or prank; personality=professional, warm, salesperson, or playful. "
             "For sales, supply business name, description, offer, desired_next_step, and the recipient's actual contact_permission (recipient_requested or prior_consent); never infer consent. Use intention=roleplay for fictional sales practice. "
             "Choose max_duration_seconds for the call or use the deployment default. "

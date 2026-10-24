@@ -42,24 +42,24 @@ SALES_GUIDE = (
 )
 
 
-def personality_instructions(packet: ContextPacket) -> str:
+INTENTION_PROMPTS = {
+    "task": "",
+    "sales": SALES_GUIDE + " ",
+    "conversation": "The recipient may choose topics, request a fictional story, or suggest a harmless role-play within this conversation. Fulfill the request instead of discussing the test. Make fiction clear from context. A short story can take several sentences; finish its thought before asking another question. Fiction does not create real commitments. ",
+    "roleplay": "The recipient may choose topics, request a fictional story, or suggest a harmless role-play within this conversation. Fulfill the request instead of discussing the test. Make fiction clear from context. A short story can take several sentences; finish its thought before asking another question. Fiction does not create real commitments. ",
+    "prank": "Keep this a harmless, playful call. Make the fictional premise clear early and reveal the joke immediately if the person is confused or asks. Never impersonate an authority, real business, relative, emergency service, or trusted person. Do not fabricate danger, debts, legal trouble, health news, or financial consequences. Ask for no sensitive data or payment. If they are uncomfortable or decline, apologize and end. No repeat calls. ",
+}
+
+
+def personality_instructions(
+    packet: ContextPacket,
+    *,
+    personality_prompt: str | None = None,
+    intention_prompts: dict[str, str] | None = None,
+) -> str:
     result = f"Call intention: {packet.intention}. Personality: {packet.personality}. "
-    result += PERSONALITIES[packet.personality] + " "
-    if packet.intention == "sales":
-        result += SALES_GUIDE + " "
-    if packet.intention in {"conversation", "roleplay"}:
-        result += (
-            "The recipient may choose topics, request a fictional story, or suggest a harmless "
-            "role-play within this conversation. Fulfill the request instead of discussing the test. "
-            "Make fiction clear from context. A short story can take several sentences; finish its "
-            "thought before asking another question. Fiction does not create real commitments. "
-        )
-    if packet.intention == "prank":
-        result += (
-            "Keep this a harmless, playful call. Make the fictional premise clear early and reveal "
-            "the joke immediately if the person is confused or asks. Never impersonate an authority, "
-            "real business, relative, emergency service, or trusted person. Do not fabricate danger, "
-            "debts, legal trouble, health news, or financial consequences. Ask for no sensitive data "
-            "or payment. If they are uncomfortable or decline, apologize and end. No repeat calls. "
-        )
+    result += (
+        personality_prompt if personality_prompt is not None else PERSONALITIES[packet.personality]
+    ) + " "
+    result += (intention_prompts or INTENTION_PROMPTS).get(packet.intention, "")
     return result

@@ -1,0 +1,751 @@
+import { useEffect, useRef, useState } from "react";
+import {
+  Search,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  FileText,
+  Phone,
+  ArrowUpRight,
+  Square,
+  RefreshCw,
+} from "lucide-react";
+import { api, message } from "./api";
+import { tabKeys } from "./a11y";
+import {
+  languages,
+  terminal,
+  type Brief,
+  type Call,
+  type Detail,
+  type Session,
+} from "./types";
+
+export function date(
+  value: string | null | undefined,
+  zone: string,
+  short = false,
+) {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: zone,
+    ...(short
+      ? { day: "numeric", month: "short" }
+      : {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+  }).format(new Date(value));
+}
+const stateLabel = (state: string) =>
+  state.replaceAll("_", " ").replace(/^./, (v) => v.toUpperCase());
+export default function Calls({
+  selected,
+  session,
+  navigate,
+  onNew,
+}: {
+  selected?: string;
+  session: Session;
+  navigate: (path: string) => void;
+  onNew: (brief?: Brief) => void;
+}) {
+  const [calls, setCalls] = useState<Call[]>([]),
+    [q, setQ] = useState(""),
+    [state, setState] = useState(""),
+    [language, setLanguage] = useState(""),
+    [profile, setProfile] = useState(""),
+    [start, setStart] = useState(""),
+    [end, setEnd] = useState("");
+  const [cursor, setCursor] = useState<string | null>(null),
+    [error, setError] = useState(""),
+    [loading, setLoading] = useState(true),
+    [loadingMore, setLoadingMore] = useState(false),
+    [refresh, setRefresh] = useState(0);
+  const paginated = useRef(false),
+    pageRequest = useRef(false),
+    filterKey = useRef("");
+  filterKey.current = JSON.stringify([q, state, language, profile, start, end]);
+  useEffect(() => {
+    paginated.current = false;
+  }, [q, state, language, profile, start, end]);
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => {
+        setLoading(true);
+        const params = new URLSearchParams({
+          q,
+          state,
+          language,
+          profile,
+          start,
+          end,
+        });
+        api<{ calls: Call[]; next_cursor: string | null }>(
+          "/calls?" + params,
+          undefined,
+          undefined,
+          controller.signal,
+        )
+          .then((r) => {
+            setCalls(r.calls);
+            setCursor(r.next_cursor);
+            setError("");
+          })
+          .catch((e) => {
+            if (e.name !== "AbortError") setError(message(e));
+          })
+          .finally(() => {
+            if (!controller.signal.aborted) setLoading(false);
+          });
+      },
+      q ? 250 : 0,
+    );
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [q, state, language, profile, start, end, refresh]);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (!paginated.current && !pageRequest.current) setRefresh((v) => v + 1);
+    }, 15000);
+    return () => clearInterval(timer);
+  }, []);
+  async function more() {
+    if (!cursor || pageRequest.current || loading) return;
+    const requestedFilters = filterKey.current;
+    pageRequest.current = true;
+    setLoadingMore(true);
+    try {
+      const r = await api<{ calls: Call[]; next_cursor: string | null }>(
+        "/calls?" +
+          new URLSearchParams({
+            q,
+            state,
+            language,
+            profile,
+            start,
+            end,
+            cursor,
+          }),
+      );
+      if (requestedFilters !== filterKey.current) return;
+      paginated.current = true;
+      setCalls((v) => [
+        ...v,
+        ...r.calls.filter((c) => !v.some((old) => old.call_id === c.call_id)),
+      ]);
+      setCursor(r.next_cursor);
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      pageRequest.current = false;
+      setLoadingMore(false);
+    }
+  }
+  return (
+    <div className={"calls-layout " + (selected ? "has-selection" : "")}>
+      <section className="call-list-pane" aria-label="Call history">
+        <div className="list-controls">
+          <label className="search-field">
+            <Search size={17} />
+            <input
+              aria-label="Search transcripts and recipients"
+              placeholder="Search calls and transcripts"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+          </label>
+          <div className="filter-row">
+            <select
+              aria-label="Filter by status"
+              value={state}
+              onChange={(e) => setState(e.target.value)}
+            >
+              <option value="">All statuses</option>
+              {[
+                "completed",
+                "failed",
+                "timed_out",
+                "active",
+                "terminating",
+              ].map((v) => (
+                <option key={v} value={v}>
+                  {stateLabel(v)}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Filter by language"
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+            >
+              <option value="">All languages</option>
+              {Object.entries(languages).map(([k, v]) => (
+                <option key={k} value={k}>
+                  {v}
+                </option>
+              ))}
+            </select>
+            <button
+              className="icon-button"
+              aria-label="Refresh calls"
+              disabled={loadingMore}
+              onClick={() => {
+                paginated.current = false;
+                setRefresh((v) => v + 1);
+              }}
+            >
+              <RefreshCw size={16} />
+            </button>
+          </div>
+          <details className="compact-details">
+            <summary>More filters</summary>
+            <label>
+              Personality
+              <select
+                value={profile}
+                onChange={(e) => setProfile(e.target.value)}
+              >
+                <option value="">All personalities</option>
+                {session.setup.profiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="two-fields">
+              <label>
+                From
+                <input
+                  type="date"
+                  value={start}
+                  onChange={(e) => setStart(e.target.value)}
+                />
+              </label>
+              <label>
+                Through
+                <input
+                  type="date"
+                  value={end}
+                  onChange={(e) => setEnd(e.target.value)}
+                />
+              </label>
+            </div>
+          </details>
+        </div>
+        {error && (
+          <p role="alert" className="error inset">
+            {error}
+          </p>
+        )}
+        {loading && !calls.length && (
+          <p className="muted inset" role="status">
+            Loading calls…
+          </p>
+        )}
+        <div className="call-rows">
+          {calls.map((call) => (
+            <button
+              className={
+                "call-row " + (selected === call.call_id ? "selected" : "")
+              }
+              key={call.call_id}
+              onClick={() => navigate("/calls/" + call.call_id)}
+              aria-current={selected === call.call_id ? "true" : undefined}
+            >
+              <span className="row-top">
+                <strong>{call.target.name}</strong>
+                <time>{date(call.created_at, session.timezone, true)}</time>
+              </span>
+              <span className="row-number">{call.target.phone}</span>
+              <span className="row-objective">{call.objective}</span>
+              <span className="row-footer">
+                <span
+                  className={
+                    "status-label " + (call.state === "failed" ? "bad" : "")
+                  }
+                >
+                  {stateLabel(call.state)}
+                </span>
+                <span>
+                  {languages[call.language] || "Language not recorded"}
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
+        {!loading && !calls.length && (
+          <div className="empty small">
+            <Search size={25} />
+            <h2>
+              {q || state || language || start || end
+                ? "No matching calls"
+                : "No calls yet"}
+            </h2>
+            <p>
+              {q || state || language || start || end
+                ? "Try a different search or clear the filters."
+                : "Start a call here or ask Hermes. Recordings and transcripts will appear here."}
+            </p>
+          </div>
+        )}
+        {cursor && (
+          <button
+            className="load-more"
+            onClick={more}
+            disabled={loadingMore || loading}
+          >
+            {loadingMore ? "Loading…" : "Load More"}
+          </button>
+        )}
+      </section>
+      {selected ? (
+        <CallDetail
+          key={selected}
+          id={selected}
+          session={session}
+          onBack={() => navigate("/calls")}
+          onReuse={onNew}
+        />
+      ) : (
+        <section className="empty call-welcome">
+          <div className="empty-symbol">
+            <Phone size={30} />
+          </div>
+          <h2>Your conversations, together.</h2>
+          <p>
+            Select a call to listen, read the transcript,
+            <br />
+            and see the settings that shaped it.
+          </p>
+          <button onClick={() => onNew()}>
+            Start a Call <ArrowUpRight size={16} />
+          </button>
+          <span className="muted caption">
+            RECORDINGS AND TRANSCRIPTS STAY PRIVATE
+          </span>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function CallDetail({
+  id,
+  session,
+  onBack,
+  onReuse,
+}: {
+  id: string;
+  session: Session;
+  onBack: () => void;
+  onReuse: (brief: Brief) => void;
+}) {
+  const [detail, setDetail] = useState<Detail | null>(null),
+    [error, setError] = useState(""),
+    [tab, setTab] = useState("transcript"),
+    [note, setNote] = useState(""),
+    [tags, setTags] = useState(""),
+    [saved, setSaved] = useState(false),
+    [ending, setEnding] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!detail || terminal(detail.state)) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [detail?.state]);
+  const last = useRef(0),
+    initialized = useRef(false);
+  useEffect(() => {
+    let alive = true,
+      busy = false,
+      done = false;
+    const abort = new AbortController();
+    async function load() {
+      if (busy || done) return;
+      busy = true;
+      try {
+        let after = last.current;
+        const turns: Detail["transcript"] = [];
+        let result: Detail;
+        do {
+          result = await api<Detail>(
+            `/calls/${id}?after=${after}`,
+            undefined,
+            undefined,
+            abort.signal,
+          );
+          turns.push(...result.transcript);
+          after = result.next_transcript_cursor ?? 0;
+        } while (after);
+        if (!alive) return;
+        last.current = turns.at(-1)?.sequence_number ?? last.current;
+        setDetail((old) => ({
+          ...result,
+          transcript: [
+            ...new Map(
+              [...(old?.transcript || []), ...turns].map((t) => [
+                t.sequence_number,
+                t,
+              ]),
+            ).values(),
+          ],
+        }));
+        done = terminal(result.state);
+        if (!initialized.current) {
+          setNote(result.annotation.note);
+          setTags(result.annotation.tags.join(", "));
+          initialized.current = true;
+        }
+      } catch (e) {
+        if (alive) setError(message(e));
+      } finally {
+        busy = false;
+      }
+    }
+    load();
+    const timer = setInterval(load, 2000);
+    return () => {
+      alive = false;
+      abort.abort();
+      clearInterval(timer);
+    };
+  }, [id]);
+  async function end() {
+    setEnding(true);
+    try {
+      await api(`/calls/${id}/end`, "POST");
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setEnding(false);
+    }
+  }
+  async function saveNote() {
+    try {
+      await api(`/calls/${id}/annotation`, "PUT", {
+        note,
+        tags: tags
+          .split(",")
+          .map((x) => x.trim())
+          .filter(Boolean),
+      });
+      setSaved(true);
+    } catch (e) {
+      setError(message(e));
+    }
+  }
+  if (!detail)
+    return (
+      <section className="detail-pane">
+        <button className="back-button" onClick={onBack}>
+          <ChevronLeft size={18} />
+          Calls
+        </button>
+        <p
+          role={error ? "alert" : "status"}
+          className={error ? "error" : "muted"}
+        >
+          {error || "Opening call…"}
+        </p>
+      </section>
+    );
+  const elapsed = Math.max(
+    0,
+    Math.floor(
+      ((detail.timing.ended_at ? Date.parse(detail.timing.ended_at) : now) -
+        Date.parse(detail.timing.answered_at || detail.timing.created_at)) /
+        1000,
+    ),
+  );
+  const durationLabel = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`;
+  const mp3 = detail.artifacts.files.some((f) => f.name === "recording.mp3"),
+    md = detail.artifacts.files.some((f) => f.name === "transcript.md");
+  return (
+    <section className="detail-pane">
+      <div className="call-detail-heading">
+        <button className="back-button" onClick={onBack}>
+          <ChevronLeft size={18} />
+          Calls
+        </button>
+        <div className="row-top">
+          <div>
+            <span className="eyebrow">
+              {date(detail.timing.created_at, session.timezone)}
+            </span>
+            <h2>{detail.brief.target.name}</h2>
+            <span className="muted">{detail.brief.target.phone}</span>
+          </div>
+          <span className="pill">
+            {stateLabel(detail.state)} ·{" "}
+            <span aria-label="Elapsed call time">{durationLabel}</span>
+          </span>
+        </div>
+        <p className="call-objective">{detail.brief.objective}</p>
+        <div className="call-actions">
+          {!terminal(detail.state) && (
+            <button className="danger" disabled={ending} onClick={end}>
+              <Square size={15} />
+              {ending ? "Ending…" : "End Call"}
+            </button>
+          )}
+          <button onClick={() => onReuse(detail.brief)}>
+            Use This Brief Again <ChevronRight size={15} />
+          </button>
+        </div>
+        {mp3 ? (
+          <div className="recording">
+            <div className="row-top">
+              <strong>Recording</strong>
+              <a
+                href={`/admin/api/calls/${id}/files/recording.mp3`}
+                download="recording.mp3"
+              >
+                <Download size={14} />
+                MP3
+              </a>
+            </div>
+            <audio
+              controls
+              preload="metadata"
+              src={`/admin/api/calls/${id}/files/recording.mp3`}
+            />
+          </div>
+        ) : (
+          <div className="recording muted">
+            <FileText size={18} />
+            <span>
+              {!terminal(detail.state)
+                ? "The recording will be available after the call."
+                : `Recording ${detail.artifacts.audio_status}. The transcript remains available below.`}
+            </span>
+          </div>
+        )}
+        <div
+          className="detail-tabs"
+          role="tablist"
+          aria-label="Call details"
+          onKeyDown={tabKeys}
+        >
+          {["transcript", "brief", "settings", "diagnostics", "notes"].map(
+            (t) => (
+              <button
+                key={t}
+                role="tab"
+                aria-selected={tab === t}
+                onClick={() => setTab(t)}
+              >
+                {t[0].toUpperCase() + t.slice(1)}
+              </button>
+            ),
+          )}
+        </div>
+      </div>
+      {error && (
+        <p role="alert" className="error">
+          {error}
+        </p>
+      )}
+      <div
+        className="detail-content"
+        role="tabpanel"
+        id={`call-panel-${tab}`}
+        aria-labelledby={`call-tab-${tab}`}
+      >
+        {tab === "transcript" && (
+          <>
+            <div className="section-heading">
+              <span className="muted">
+                {detail.transcript.length} entries · times in {session.timezone}
+              </span>
+              {md && (
+                <a
+                  href={`/admin/api/calls/${id}/files/transcript.md`}
+                  download="transcript.md"
+                >
+                  <Download size={14} />
+                  Full Markdown
+                </a>
+              )}
+            </div>
+            <p className="caption muted">
+              Entry times are not exact audio timestamps.
+            </p>
+            {detail.transcript.length ? (
+              detail.transcript.map((turn, i) => (
+                <article
+                  className="transcript-turn"
+                  key={turn.sequence_number ?? i}
+                >
+                  <header>
+                    <strong>
+                      {turn.speaker === "assistant"
+                        ? "Calling agent"
+                        : "Recipient"}
+                    </strong>
+                    {turn.created_at && (
+                      <time>
+                        {new Intl.DateTimeFormat("en-GB", {
+                          timeZone: session.timezone,
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          second: "2-digit",
+                        }).format(new Date(turn.created_at))}
+                      </time>
+                    )}
+                    {turn.source_event_type?.includes("interrupted") && (
+                      <span className="caption">Interrupted</span>
+                    )}
+                  </header>
+                  <p>{turn.text}</p>
+                </article>
+              ))
+            ) : (
+              <p className="muted">No speech has been transcribed.</p>
+            )}
+          </>
+        )}
+        {tab === "brief" && (
+          <div className="reading">
+            <h3>Approved brief</h3>
+            <dl className="facts">
+              <dt>Intention</dt>
+              <dd>{detail.brief.intention}</dd>
+              <dt>Initial language</dt>
+              <dd>{languages[detail.brief.language]}</dd>
+              <dt>Duration budget</dt>
+              <dd>{detail.brief.max_duration_seconds / 60} minutes</dd>
+            </dl>
+            {[
+              ["Relevant facts", detail.brief.relevant_facts],
+              ["Allowed commitments", detail.brief.allowed_commitments],
+              ["Limits", detail.brief.hard_constraints],
+            ].map(([label, values]) => (
+              <div key={String(label)}>
+                <h4>{String(label)}</h4>
+                <p className="preserve">
+                  {(values as string[]).join("\n") || "None supplied"}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+        {tab === "settings" &&
+          (detail.configuration ? (
+            <div className="reading">
+              <h3>{detail.configuration.profile_name}</h3>
+              <p className="muted">
+                Personality v{detail.configuration.profile_revision} · Global
+                settings v{detail.configuration.configuration_revision}
+              </p>
+              <dl className="facts">
+                <dt>Model</dt>
+                <dd>{detail.configuration.voice.dialogue_model}</dd>
+                <dt>Voice</dt>
+                <dd>{detail.configuration.voice.inworld_voice}</dd>
+                <dt>Voice model</dt>
+                <dd>{detail.configuration.voice.inworld_model}</dd>
+              </dl>
+              <details>
+                <summary>Exact prompt used</summary>
+                <pre className="prompt-preview">{detail.prompt}</pre>
+              </details>
+              <details>
+                <summary>All settings used</summary>
+                <pre>{JSON.stringify(detail.configuration.voice, null, 2)}</pre>
+              </details>
+            </div>
+          ) : (
+            <div className="empty small">
+              <h3>Configuration not recorded</h3>
+              <p>
+                This older call has no saved configuration snapshot. Its
+                original brief is still available.
+              </p>
+            </div>
+          ))}
+        {tab === "diagnostics" && (
+          <div className="reading">
+            <h3>Call diagnostics</h3>
+            <dl className="facts">
+              <dt>Ended because</dt>
+              <dd>
+                {detail.timing.termination_reason?.replaceAll("_", " ") ||
+                  "Still in progress"}
+              </dd>
+              <dt>Answered</dt>
+              <dd>{date(detail.timing.answered_at, session.timezone)}</dd>
+              <dt>Ended</dt>
+              <dd>{date(detail.timing.ended_at, session.timezone)}</dd>
+            </dl>
+            <h4>Server reply delays</h4>
+            <p className="muted">
+              These measurements exclude carrier and handset delay.
+            </p>
+            {detail.latency.length ? (
+              detail.latency.map((m, i) => (
+                <details key={i} className="metric">
+                  <summary>
+                    Reply {i + 1}
+                    <strong>{m.seconds.toFixed(2)} s</strong>
+                  </summary>
+                  {m.parts?.map((p, j) => (
+                    <div className="row-top" key={j}>
+                      <span>{p.stage.replaceAll("_", " ")}</span>
+                      <span>{p.seconds.toFixed(2)} s</span>
+                    </div>
+                  ))}
+                </details>
+              ))
+            ) : (
+              <p className="muted">
+                No timing measurements were recorded for this call.
+              </p>
+            )}
+          </div>
+        )}
+        {tab === "notes" && (
+          <div className="reading">
+            <h3>Your review</h3>
+            <p className="muted">Notes never change the original transcript.</p>
+            <label>
+              Notes
+              <textarea
+                rows={7}
+                value={note}
+                onChange={(e) => {
+                  setNote(e.target.value);
+                  setSaved(false);
+                }}
+              />
+            </label>
+            <label>
+              Quality tags
+              <input
+                value={tags}
+                placeholder="Natural voice, long pauses, wrong language"
+                onChange={(e) => {
+                  setTags(e.target.value);
+                  setSaved(false);
+                }}
+              />
+            </label>
+            <div className="save-row">
+              <button className="primary" onClick={saveNote}>
+                Save Notes
+              </button>
+              {saved && <span role="status">Saved</span>}
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}

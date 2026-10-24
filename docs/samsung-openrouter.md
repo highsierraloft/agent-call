@@ -36,6 +36,67 @@ The existing OpenAI/Twilio backend remains the default and retains its existing 
 - An uncertain call remains terminating and blocks new calls. It never causes automatic redial.
 - A recipient reply cancels a pending farewell. Closing preserves a three-second reply window.
 
+## Private control panel
+
+The control panel manages call history, versioned personalities, browser practice, and the calling
+guide consumed by Hermes. Its React interface is built with `dashboard/package-lock.json` and
+served by `Dockerfile.control`. Administration APIs remain inside the existing FastAPI worker.
+
+Saving creates an immutable revision and applies it to future preparations. Existing plans and
+active calls retain their stored prompt and voice settings. Restoration creates another revision.
+Concurrent saves use the expected revision and return a conflict instead of overwriting another edit.
+Built-in profile IDs remain available for older clients; custom profiles can be archived.
+
+`ContextPacket.profile_id` is optional. `get_calling_setup` supplies the current calling guide,
+active profile IDs, languages, and defaults. Install a calling-specific Hermes bootstrap that fetches
+this tool before each preparation. The dashboard does not need Hermes's home directory or credentials.
+Call results include configuration revision references. Full snapshots are available only in the
+authenticated control panel. Older calls without snapshots remain explicitly unrecorded.
+
+Set `android.dashboard_config_file` to a private, read-only JSON mount with `bridge_token`,
+`owner_login`, `public_origin`, `trusted_proxy_ips`, `timezone`, and `hermes_url`.
+The bridge token is a separate random credential of at least 32 characters. The owner login is the
+personal Tailscale identity allowed to open the panel. Both URLs use private Tailscale HTTPS.
+Use exact Docker host gateway addresses for `trusted_proxy_ips`; do not trust entire container subnets.
+
+The Caddy container accepts application traffic only from those host proxies and the configured
+Tailscale identity. It adds the bridge credential to worker requests. This prevents another container
+from impersonating the owner by sending a forged identity header directly to Caddy. The worker also
+checks the bridge credential, identity, origin, and a signed CSRF cookie for mutations.
+Neither provider credentials nor the MCP bearer token are sent to browser JavaScript.
+Publish only the proxy's loopback port and add a dedicated Tailscale Serve HTTPS route.
+Preserve existing Serve routes and keep the worker's MCP and telephone-media endpoints unpublished.
+
+Voice practice uses Pipecat's JavaScript WebSocket transport and the same speech pipeline.
+Its `WavMediaManager` runs locally without Daily CDN downloads. Browser input uses 16 kHz;
+Pipecat resamples output to the manager's 24 kHz player. Telephone audio remains 8 kHz.
+It cannot dial or change real recipient opt-outs. Phone calls and practice share one voice slot.
+Browser disconnect, cancellation, and provider failure release that slot after cleanup.
+Practice transcripts are temporary and separate from telephone records. Unsaved edits can be tested
+without applying them. Browser timings do not establish cellular carrier or handset latency.
+
+Calls support transcript search, filters, pagination, notes, quality tags, and authenticated files.
+Notes never alter the original transcript. MP3 responses support byte ranges; Markdown downloads
+have an explicit `.md` filename. Neither file type has automatic retention cleanup.
+Inworld voice choices and tool-capable OpenRouter model choices are fetched server-side and cached.
+The current selection remains usable if a provider catalog cannot be loaded.
+
+Run `npm ci`, `npm run build`, and `npm test` from `dashboard/` for frontend verification.
+Browser tests use synthetic records and intercepted APIs; they cannot place a telephone call.
+`Dockerfile.control-tests` provides an isolated Linux WebKit environment when the local runtime
+is unavailable. Run it with no external network after building its dependencies.
+Provider-backed browser acceptance uses synthetic microphone audio, not an unattended real microphone.
+The control-panel gate passed 959 backend tests with two skips and 89.00% coverage.
+Forty browser checks cover Chromium, dark appearance, desktop WebKit, and phone WebKit.
+They include the local audio handshake, microphone release, permission denial, and stable pagination.
+The production image also removes Caddy's file capability so it runs with all Linux capabilities dropped.
+A provider-backed browser replay completed four languages and interruptions. Four measured reply starts
+were 1.195–1.443 seconds after user silence at the server; the first greeting took 2.452 seconds.
+These are small samples, not latency percentiles. The earlier telephone-transport replay measured
+1.082–1.262 seconds. Different transports, input samples, and provider timing prevent a direct regression claim.
+Explicit stop and tab closure both released practice capacity. Native Hermes model discovery,
+authenticated MP3 seeking, Markdown delivery, and the live voice/model catalogs passed without dialing.
+
 ## Results and limitations
 
 `get_call_result` returns transcript text, speakers, timestamps, and source metadata.

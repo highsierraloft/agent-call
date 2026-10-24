@@ -396,7 +396,9 @@ async def test_start_requires_initial_language_in_deployment_allowlist(android, 
     with pytest.raises(CallRefusal, match="language_required"):
         await start(h)
     assert not h.asterisk.dials
-    h.service.config.conversation_languages = ["en", "es", "ru", "uk"]
+    saved = await h.service.control.current("global")
+    saved["value"]["voice"]["conversation_languages"] = ["en", "es", "ru", "uk"]
+    await h.service.control.save("global", saved["value"], saved["revision"], "test")
     started = await start(h)
     assert started.state == CallState.PREWARMING
 
@@ -423,6 +425,9 @@ async def test_production_destination_and_budget_are_bound_to_the_approved_plan(
     h.service.config.allow_any_destination = True
     h.service.settings.allow_all_country_codes = True
     h.service.config.max_call_seconds = 7200
+    saved = await h.service.control.current("global")
+    saved["value"]["voice"]["max_call_seconds"] = 7200
+    await h.service.control.save("global", saved["value"], saved["revision"], "test")
     h.packet.max_duration_seconds = 1800
     h.packet.target.phone = "+442079460123"
     plan = await prepare(h)

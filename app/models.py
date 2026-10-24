@@ -89,6 +89,7 @@ class ContextPacket(BaseModel):
     language: Literal["en", "es", "ru", "uk"] | None = None
     intention: Literal["task", "conversation", "sales", "roleplay", "prank"] = "task"
     personality: Literal["professional", "warm", "salesperson", "playful"] = "warm"
+    profile_id: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$")
     business: BusinessContext | None = None
     max_duration_seconds: int | None = Field(default=None, ge=30, le=7200)
     relevant_facts: list[str] = Field(default_factory=list, max_length=100)

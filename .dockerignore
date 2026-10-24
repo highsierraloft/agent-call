@@ -25,6 +25,13 @@ scripts/**
 !scripts/agent_call_console.py
 !scripts/container-entrypoint.sh
 
+!Dockerfile.control
+!Dockerfile.control-tests
+!deploy/control/
+!deploy/control/**
+!dashboard/
+!dashboard/**
+
 # Re-exclude secrets, VCS, caches, and runtime data even under allowed paths.
 **/.git
 **/.git/**
@@ -60,3 +67,12 @@ scripts/**
 **/transcripts/**
 **/data
 **/data/**
+
+**/node_modules
+**/node_modules/**
+**/dist
+**/dist/**
+**/test-results
+**/test-results/**
+**/playwright-report
+**/playwright-report/**

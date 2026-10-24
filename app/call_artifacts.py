@@ -253,7 +253,9 @@ class CallArtifacts:
         call_id = call["call_id"]
         async with self._locks.setdefault(call_id, asyncio.Lock()):
             directory = self.directory(call_id)
-            self._write(directory / "transcript.md", transcript_markdown(call, turns).encode())
+            await asyncio.to_thread(
+                self._write, directory / "transcript.md", transcript_markdown(call, turns).encode()
+            )
             audio = directory / "recording.mp3"
             marker = directory / "capture.json"
             if audio.exists() and await self.audio_duration(audio) is None:

@@ -315,6 +315,9 @@ class DatabaseEngine:
         conn = await aiosqlite.connect(self.path)
         try:
             conn.row_factory = aiosqlite.Row
+            await conn.create_function(
+                "casefold", 1, lambda value: str(value or "").casefold(), deterministic=True
+            )
             await conn.execute("PRAGMA foreign_keys=ON")
             await conn.execute("PRAGMA busy_timeout=5000")
             await conn.execute("PRAGMA journal_mode=WAL")
@@ -328,6 +331,9 @@ class DatabaseEngine:
 
     async def _run_migrations(self, conn: aiosqlite.Connection) -> None:
         await conn.executescript(SCHEMA)
+        from app.db.control import CONTROL_SCHEMA
+
+        await conn.executescript(CONTROL_SCHEMA)
         async with conn.execute("PRAGMA table_info(calls)") as cursor:
             existing = {row[1] for row in await cursor.fetchall()}
         for legacy_name, current_name in (

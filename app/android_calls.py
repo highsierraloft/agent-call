@@ -18,6 +18,7 @@ from app.android_voice import AndroidVoiceSession, VoiceCallbacks
 from app.asterisk_client import AsteriskClient, AsteriskError
 from app.call_artifacts import ArtifactContent, CallArtifacts
 from app.call_planning import claim_approved_call, prepare_call
+from app.control import ControlPlane
 from app.db import Database
 from app.errors import CallRefusal, ErrorCode
 from app.finalizer import Finalizer
@@ -46,6 +47,8 @@ class _Call:
     created: float = field(default_factory=time.monotonic)
     media_attached: asyncio.Event = field(default_factory=asyncio.Event)
     media_in_application: asyncio.Event = field(default_factory=asyncio.Event)
+    config: AndroidConfig | None = None
+    configuration: dict[str, Any] | None = None
     voice: AndroidVoiceSession | None = None
     voice_task: asyncio.Task[Any] | None = None
     transcript: asyncio.Queue[TranscriptItem] = field(default_factory=asyncio.Queue)
@@ -86,6 +89,7 @@ class AndroidCallService:
         self._events: asyncio.Task[None] | None = None
         self._stopping = False
         self._ending_after: dict[str, float] = {}
+        self.control = ControlPlane(self, db)
 
     def _spawn(self, coroutine: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
         task = asyncio.create_task(coroutine)
@@ -100,7 +104,8 @@ class AndroidCallService:
         task.add_done_callback(done)
         return task
 
-    def _validate_packet(self, packet: ContextPacket) -> None:
+    def _validate_packet(self, packet: ContextPacket, config: AndroidConfig | None = None) -> None:
+        config = config or self.config
         if (
             not self.config.allow_any_destination
             and packet.target.phone not in self.config.allowed_destinations
@@ -109,7 +114,7 @@ class AndroidCallService:
                 "destination_not_enabled", "The destination is not enabled by this deployment"
             )
         try:
-            self.config.call_duration(packet.max_duration_seconds)
+            config.call_duration(packet.max_duration_seconds)
         except ValueError as exc:
             raise CallRefusal("duration_not_allowed", str(exc)) from exc
         if packet.target.phone == self.config.caller_number:
@@ -123,18 +128,23 @@ class AndroidCallService:
         self._validate_packet(request.context)
         if await self.db.is_destination_suppressed(request.context.target.phone):
             raise CallRefusal("recipient_opted_out", "The recipient requested no further calls")
-        request = request.model_copy(
-            update={
-                "context": request.context.model_copy(
-                    update={
-                        "max_duration_seconds": self.config.call_duration(
-                            request.context.max_duration_seconds
-                        )
-                    }
-                )
-            }
+        try:
+            snapshot = await self.control.resolve(request.context)
+        except LookupError as exc:
+            raise CallRefusal(
+                "profile_not_found", "Select a profile from get_calling_setup"
+            ) from exc
+        packet = self.control.normalize_packet(request.context, snapshot)
+        snapshot["effective_prompt"] = self.control.prompt(packet, snapshot)
+        return await prepare_call(
+            self.settings,
+            self.db,
+            request.model_copy(update={"context": packet}),
+            configuration_snapshot=snapshot,
         )
-        return await prepare_call(self.settings, self.db, request)
+
+    async def get_calling_setup(self) -> dict[str, Any]:
+        return await self.control.setup(from_mcp=True)
 
     async def start(
         self, plan_id: str, *, explicit_confirmation: bool, confirmation_text: str
@@ -142,6 +152,8 @@ class AndroidCallService:
         if not self.settings.live_calls_enabled:
             raise CallRefusal(ErrorCode.LIVE_CALLS_DISABLED)
         async with self._operations:
+            if self.control.practice.active is not None:
+                raise CallRefusal(ErrorCode.CALL_BUSY, "A browser practice session is active")
             if not self.supervision_ready():
                 raise CallRefusal(ErrorCode.SUPERVISION_UNAVAILABLE)
             problem = self.phone.admission_problem()
@@ -150,10 +162,12 @@ class AndroidCallService:
             plan = await self.db.get_plan_record(plan_id)
             if plan is None:
                 raise CallRefusal(ErrorCode.PLAN_NOT_FOUND)
-            self._validate_packet(plan.context)
+            configuration = await self.db.control_plan(plan_id)
+            config = self.control.runtime_config(configuration)
+            self._validate_packet(plan.context, config)
             if await self.db.is_destination_suppressed(plan.context.target.phone):
                 raise CallRefusal("recipient_opted_out", "The recipient requested no further calls")
-            if plan.context.language not in self.config.conversation_languages:
+            if plan.context.language not in config.conversation_languages:
                 raise CallRefusal("language_required", "Specify an enabled initial call language")
             try:
                 registered = await self.asterisk.gateway_registered()
@@ -172,7 +186,9 @@ class AndroidCallService:
             runtime = _Call(
                 approved.call_id,
                 approved.context,
-                self.config.call_duration(approved.context.max_duration_seconds),
+                config.call_duration(approved.context.max_duration_seconds),
+                config=config,
+                configuration=configuration,
             )
             self._runtime = runtime
             runtime.writer = self._spawn(self._write_transcript(runtime))
@@ -242,9 +258,16 @@ class AndroidCallService:
             websocket,
             call_id=runtime.call_id,
             packet=runtime.packet,
-            config=self.config,
+            config=runtime.config or self.config,
             api_key=self._api_key,
-            callbacks=VoiceCallbacks(transcript, failed, finish, suppress_destination),
+            configuration=runtime.configuration,
+            callbacks=VoiceCallbacks(
+                transcript,
+                failed,
+                finish,
+                suppress_destination,
+                lambda data: self._spawn(self.db.control_measure(runtime.call_id, data)),
+            ),
         )
         runtime.voice_task = asyncio.current_task()
         runtime.media_attached.set()
@@ -445,6 +468,7 @@ class AndroidCallService:
             await asyncio.sleep(1)
 
     async def start_watchdog(self) -> None:
+        await self.control.initialize()
         self._events = asyncio.create_task(self._event_loop())
         self._watchdog = asyncio.create_task(self._watch())
 
@@ -459,6 +483,7 @@ class AndroidCallService:
 
     async def stop(self) -> None:
         self._stopping = True
+        await self.control.practice.close()
         for row in await self.db.list_nonterminal_calls():
             await self.terminate_call(row["call_id"], "service_shutdown")
             await self._settle(row["call_id"])
@@ -506,7 +531,10 @@ class AndroidCallService:
             artifacts = await self.artifacts.ensure(
                 row, await self.db.get_transcript(call_id), self.asterisk
             )
+        call_row = await self.db.get_call(call_id)
+        configuration = await self.db.control_plan(call_row["plan_id"]) if call_row else None
         return {
+            "configuration": self.control.reference(configuration),
             "call_id": call_id,
             "state": snapshot.state,
             "result": result.model_dump(mode="json") if result else None,
@@ -548,7 +576,10 @@ class AndroidCallService:
         raise LookupError(command.question_id)
 
     async def acquire_deployment_lock(self) -> int:
-        return await self.db.acquire_deployment_lock()
+        async with self._operations:
+            if self.control.practice.active is not None:
+                return 1
+            return await self.db.acquire_deployment_lock()
 
     async def release_deployment_lock(self) -> None:
         await self.db.release_deployment_lock()

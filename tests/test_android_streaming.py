@@ -43,9 +43,13 @@ from app.android_voice import AndroidVoiceSession, VoiceCallbacks
     ],
 )
 async def test_streaming_audio_transcripts_and_provider_failure(
-    packet, tmp_path, monkeypatch, caplog, language, turn_detection, provider_error
+    packet, tmp_path, monkeypatch, caplog, language, turn_detection, provider_error, browser=False
 ):
     """Exercise the pinned adapters over real local sockets, without provider requests."""
+    from pipecat.frames.frames import OutputAudioRawFrame, OutputTransportMessageFrame
+    from pipecat.frames.protobufs import frames_pb2
+    from pipecat.serializers.protobuf import ProtobufFrameSerializer
+
     import app.android_voice as module
 
     caplog.set_level(logging.INFO, logger="app.android_voice")
@@ -258,7 +262,15 @@ async def test_streaming_audio_transcripts_and_provider_failure(
             outgoing.append(message)
             if "FLUSH_MEDIA" in message.get("text", ""):
                 media_flushed.put_nowait(True)
-            if message.get("bytes") and not output_received.is_set():
+            audio = bool(message.get("bytes"))
+            if browser and audio:
+                frame = frames_pb2.Frame.FromString(message["bytes"])
+                if frame.HasField("interruption"):
+                    media_flushed.put_nowait(True)
+                audio = frame.HasField("audio")
+                if audio:
+                    assert frame.audio.sample_rate == 24000
+            if audio and not output_received.is_set():
                 if provider_error not in {"finish", "finish_interruption", "sales_opt_out"}:
                     assert not model_done.is_set()
                 output_received.set()
@@ -313,30 +325,53 @@ async def test_streaming_audio_transcripts_and_provider_failure(
             config=config,
             api_key="unused-openrouter-test-key",
             callbacks=VoiceCallbacks(record, failed.set, finish, suppressed),
+            browser=browser,
         )
+        if browser:
+            session.start_conversation = AsyncMock()
         task = asyncio.create_task(session.run())
         try:
-            await incoming.put(
-                {
-                    "type": "websocket.receive",
-                    "text": json.dumps(
+            if browser:
+                serializer = ProtobufFrameSerializer()
+                ready_message = await serializer.serialize(
+                    OutputTransportMessageFrame(
                         {
-                            "event": "MEDIA_START",
-                            "connection_id": "test",
-                            "channel": "WebSocket/test",
-                            "channel_id": "call_streaming-media",
-                            "format": "slin",
-                            "optimal_frame_size": 320,
-                            "ptime": 20,
+                            "label": "rtvi-ai",
+                            "type": "client-ready",
+                            "id": "browser-test",
+                            "data": {"version": "2.0.0"},
                         }
-                    ),
-                }
-            )
+                    )
+                )
+                await incoming.put({"type": "websocket.receive", "bytes": ready_message})
+            else:
+                await incoming.put(
+                    {
+                        "type": "websocket.receive",
+                        "text": json.dumps(
+                            {
+                                "event": "MEDIA_START",
+                                "connection_id": "test",
+                                "channel": "WebSocket/test",
+                                "channel_id": "call_streaming-media",
+                                "format": "slin",
+                                "optimal_frame_size": 320,
+                                "ptime": 20,
+                            }
+                        ),
+                    }
+                )
             await asyncio.wait_for(session.ready.wait(), 15)
-            await incoming.put({"type": "websocket.receive", "bytes": input_audio})
+            encoded_input = input_audio
+            if browser:
+                encoded_input = await serializer.serialize(
+                    OutputAudioRawFrame(input_audio, sample_rate=16000, num_channels=1)
+                )
+                session.start_conversation.assert_awaited_once()
+            await incoming.put({"type": "websocket.receive", "bytes": encoded_input})
             await asyncio.wait_for(input_received.wait(), 5)
             assert not model_inputs and not transcripts and not tts_configs
-            assert stt_configs[0]["sample_rate"] == 8000
+            assert stt_configs[0]["sample_rate"] == (16000 if browser else 8000)
             assert stt_configs[0]["model"] == "stt-rt-v5"
             assert stt_configs[0]["enable_endpoint_detection"] == (turn_detection == "semantic")
             assert stt_configs[0]["max_endpoint_delay_ms"] == (
@@ -416,9 +451,19 @@ async def test_streaming_audio_transcripts_and_provider_failure(
                 assert transcripts[1][1].strip() == expected_reply
                 assert not transcripts[1][3]
                 assert " ".join(spoken_texts) == expected_reply
-                assert output_audio * len(spoken_texts) == b"".join(
-                    item.get("bytes", b"") for item in outgoing
-                )
+                if browser:
+                    frames = [
+                        frames_pb2.Frame.FromString(item["bytes"])
+                        for item in outgoing
+                        if item.get("bytes")
+                    ]
+                    pcm = b"".join(frame.audio.audio for frame in frames if frame.HasField("audio"))
+                    assert any(pcm)
+                    assert abs(len(pcm) - len(output_audio) * len(spoken_texts) * 3) <= 960
+                else:
+                    assert output_audio * len(spoken_texts) == b"".join(
+                        item.get("bytes", b"") for item in outgoing
+                    )
                 assert len(contexts) == (
                     2 if provider_error in {"finish", "finish_interruption", "sales_opt_out"} else 1
                 )
@@ -483,3 +528,13 @@ def test_invalid_provider_key_is_not_in_the_error(tmp_path, provider):
         getattr(config, provider + "_key")()
     assert secret not in str(error.value)
     assert "credential is invalid" in str(error.value)
+
+
+@pytest.mark.parametrize("language", ["en", "es", "ru", "uk"])
+@pytest.mark.parametrize("provider_error", [None, "interruption"])
+async def test_browser_protobuf_audio_and_interruptions(
+    packet, tmp_path, monkeypatch, caplog, language, provider_error
+):
+    await test_streaming_audio_transcripts_and_provider_failure(
+        packet, tmp_path, monkeypatch, caplog, language, "semantic", provider_error, browser=True
+    )
