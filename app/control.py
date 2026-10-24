@@ -23,6 +23,7 @@ from app.control_models import (
 )
 from app.db import Database
 from app.errors import CallRefusal
+from app.model_capabilities import validate_reasoning
 from app.models import ContextPacket
 from app.voice_catalog import VoiceCatalog
 from app.voice_prompts import voice_instructions
@@ -89,9 +90,12 @@ class ControlPlane:
         await self.initialize()
         if entity == "global":
             valid = GlobalConfiguration.model_validate(value)
+            await self.validate_voice(valid.voice)
             for profile in await self.profiles():
-                VoiceSettings.model_validate(
-                    {**valid.voice.model_dump(), **profile["value"]["voice_overrides"]}
+                await self.validate_voice(
+                    VoiceSettings.model_validate(
+                        {**valid.voice.model_dump(), **profile["value"]["voice_overrides"]}
+                    )
                 )
             payload = valid.model_dump(mode="json")
         elif entity == "guide":
@@ -99,7 +103,11 @@ class ControlPlane:
         elif re.fullmatch(r"profile:[a-z0-9][a-z0-9_-]{0,63}", entity):
             profile_value = ProfileConfiguration.model_validate(value)
             global_value = (await self.current("global"))["value"]
-            VoiceSettings.model_validate({**global_value["voice"], **profile_value.voice_overrides})
+            await self.validate_voice(
+                VoiceSettings.model_validate(
+                    {**global_value["voice"], **profile_value.voice_overrides}
+                )
+            )
             if entity.removeprefix("profile:") in PERSONALITIES and profile_value.archived:
                 raise ValueError(
                     "Built-in profiles cannot be archived because older clients use their names"
@@ -109,6 +117,14 @@ class ControlPlane:
             raise ValueError("Unknown configuration type")
         await self.db.control_save(entity, payload, expected, actor)
         return await self.current(entity)
+
+    async def validate_voice(self, voice: VoiceSettings) -> dict[str, Any]:
+        model = await self.catalog.model(voice.dialogue_model)
+        validate_reasoning(model, voice.reasoning_effort)
+        if voice.inworld_model not in {"inworld-tts-2", "inworld-tts-2-flash"}:
+            raise ValueError("Select Inworld TTS-2 or TTS-2 Flash.")
+        await self.catalog.validate_stt(voice.soniox_model, voice.soniox_endpoint_latency_level)
+        return model
 
     async def history(self, entity: str) -> list[dict[str, Any]]:
         await self.current(entity)
@@ -128,8 +144,13 @@ class ControlPlane:
         if profile.archived:
             raise ValueError("This profile is archived. Select another profile.")
         voice = VoiceSettings.model_validate(
-            {**global_value.voice.model_dump(), **profile.voice_overrides}
+            {
+                **global_value.voice.model_dump(),
+                **profile.voice_overrides,
+                **(overrides or {}).get("voice", {}),
+            }
         )
+        model = await self.validate_voice(voice)
         if packet.language is not None and packet.language not in voice.conversation_languages:
             raise CallRefusal(
                 "language_required", "The initial language must be enabled in this profile"
@@ -143,6 +164,7 @@ class ControlPlane:
             "personality_prompt": profile.prompt,
             "prompts": global_value.prompts.model_dump(),
             "voice": voice.model_dump(mode="json"),
+            "model_capabilities": model,
             "unsaved": bool(overrides),
         }
 
@@ -196,7 +218,13 @@ class ControlPlane:
             return self.service.config
         voice = VoiceSettings.model_validate(snapshot["voice"])
         return AndroidConfig.model_validate(
-            {**self.service.config.model_dump(), **voice.model_dump()}
+            {
+                **self.service.config.model_dump(),
+                **voice.model_dump(),
+                "dialogue_supported_parameters": (snapshot.get("model_capabilities") or {}).get(
+                    "supported_parameters"
+                ),
+            }
         )
 
     @staticmethod

@@ -944,6 +944,39 @@
     line-height: 1.65;
     tab-size: 2;
   }
+  .editor-values {
+    border: 0;
+    padding: 0;
+    margin: 0;
+    min-width: 0;
+  }
+  .voice-fields select {
+    min-width: 0;
+    width: 100%;
+  }
+  .voice-fields h4 {
+    margin: 28px 0 14px;
+  }
+  .catalog-heading {
+    flex-wrap: wrap;
+  }
+  .practice-model-settings {
+    margin: 18px 0;
+  }
+  .practice-model-settings .two-fields,
+  .practice-model-settings .three-fields {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .practice-model-settings .language-options {
+    display: block;
+  }
+  .practice-model-settings .catalog-heading {
+    align-items: flex-start;
+  }
+  .practice-model-settings p {
+    margin: 14px 0;
+  }
   .practice-setup h2 {
     font-size: 1.6429rem;
   }

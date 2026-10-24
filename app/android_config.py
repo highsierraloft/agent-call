@@ -39,11 +39,15 @@ class AndroidConfig(BaseModel):
     soniox_endpoint_sensitivity: float = Field(default=0.3, ge=-1, le=1)
     stt_model: str = "deepgram/nova-3"
     dashboard_config_file: Path | None = None
-    dialogue_temperature: float = Field(default=0.4, ge=0, le=2)
+    dialogue_temperature: float | None = Field(default=0.4, ge=0, le=2)
+    dialogue_max_tokens: int = Field(default=512, ge=64, le=16384)
+    dialogue_supported_parameters: list[str] | None = None
     dialogue_model: str = "google/gemini-3.1-flash-lite"
     dialogue_provider: str | None = Field(default=None, min_length=1)
     dialogue_fallback_providers: list[str] = Field(default_factory=list, max_length=4)
-    reasoning_effort: Literal["none", "minimal", "low", "medium", "high"] | None = "none"
+    reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"] | None = (
+        "none"
+    )
     tts_model: str = "elevenlabs/eleven-flash-v2.5"
     voice: str = "sarah"
     tts_transport: Literal["openrouter", "inworld"] = "openrouter"

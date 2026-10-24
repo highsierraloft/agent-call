@@ -489,48 +489,50 @@ export function ConfigurationEditor({
           onRefresh={showPrompt}
         />
       )}
-      {rawMode ? (
-        <label className="raw-editor">
-          Configuration
-          <textarea
-            aria-label="Configuration"
-            spellCheck={false}
-            rows={28}
-            value={raw}
-            onChange={(e) => {
-              setRaw(e.target.value);
-              setNotice("");
-            }}
+      <fieldset className="editor-values" disabled={busy}>
+        {rawMode ? (
+          <label className="raw-editor">
+            Configuration
+            <textarea
+              aria-label="Configuration"
+              spellCheck={false}
+              rows={28}
+              value={raw}
+              onChange={(e) => {
+                setRaw(e.target.value);
+                setNotice("");
+              }}
+            />
+            <small>
+              This edits the same values as the guided editor. Credentials are
+              not part of this configuration.
+            </small>
+          </label>
+        ) : entity === "global" ? (
+          <GlobalFields value={value as Global} onChange={edit} />
+        ) : entity === "guide" ? (
+          <label>
+            Instructions
+            <textarea
+              aria-label="Instructions"
+              rows={22}
+              value={(value as Guide).text}
+              onChange={(e) => edit({ text: e.target.value })}
+            />
+          </label>
+        ) : (
+          <ProfileFields
+            value={value as Profile}
+            base={session.setup.defaults}
+            onChange={edit}
+            canArchive={
+              !["warm", "professional", "salesperson", "playful"].includes(
+                entity.slice(8),
+              )
+            }
           />
-          <small>
-            This edits the same values as the guided editor. Credentials are not
-            part of this configuration.
-          </small>
-        </label>
-      ) : entity === "global" ? (
-        <GlobalFields value={value as Global} onChange={edit} />
-      ) : entity === "guide" ? (
-        <label>
-          Instructions
-          <textarea
-            aria-label="Instructions"
-            rows={22}
-            value={(value as Guide).text}
-            onChange={(e) => edit({ text: e.target.value })}
-          />
-        </label>
-      ) : (
-        <ProfileFields
-          value={value as Profile}
-          base={session.setup.defaults}
-          onChange={edit}
-          canArchive={
-            !["warm", "professional", "salesperson", "playful"].includes(
-              entity.slice(8),
-            )
-          }
-        />
-      )}
+        )}
+      </fieldset>
     </section>
   );
 }

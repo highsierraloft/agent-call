@@ -399,3 +399,141 @@ test("voice practice connects with local audio and releases its microphone", asy
   expect(state.practiceStops).toBeGreaterThan(0);
   await expect(page.getByRole("alert")).not.toBeVisible();
 });
+
+test("provider dropdowns respect model capabilities and keep reasoning off on model changes", async ({
+  page,
+}) => {
+  const state = await installFixture(page);
+  await page.goto("/personalities");
+  await page.getByRole("button", { name: "Global Defaults" }).click();
+  const model = page.getByRole("combobox", {
+    name: "OpenRouter model",
+    exact: true,
+  });
+  await expect(
+    model.getByRole("option", { name: "OpenAI: GPT-6 Luna", exact: true }),
+  ).toHaveCount(1);
+  await model.selectOption("openai/gpt-6-luna");
+  await expect(
+    page.getByRole("combobox", { name: "Reasoning", exact: true }),
+  ).toHaveValue("none");
+  await expect(
+    page.getByRole("checkbox", { name: "Apply temperature", exact: true }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("spinbutton", { name: "Temperature", exact: true }),
+  ).toBeDisabled();
+  await page.getByRole("button", { name: "Save Changes", exact: true }).click();
+  await expect
+    .poll(() => state.records.global.value.voice.dialogue_model)
+    .toBe("openai/gpt-6-luna");
+  expect(state.records.global.value.voice.dialogue_temperature).toBeNull();
+  await model.selectOption("google/gemini-3.8-flash");
+  await expect(
+    page.getByRole("combobox", { name: "Reasoning", exact: true }),
+  ).toHaveValue("none");
+  await expect(
+    page.getByText("The selected reasoning level is not supported.", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await page
+    .getByRole("combobox", { name: "Reasoning", exact: true })
+    .selectOption("low");
+  await expect(
+    page.getByText("The selected reasoning level is not supported.", {
+      exact: false,
+    }),
+  ).toHaveCount(0);
+  await model.selectOption("google/gemini-3.1-flash-lite");
+  await page
+    .getByRole("checkbox", { name: "Apply temperature", exact: true })
+    .check();
+  await page
+    .getByRole("spinbutton", { name: "Temperature", exact: true })
+    .fill("0.2");
+  await page
+    .getByRole("checkbox", { name: "Apply temperature", exact: true })
+    .uncheck();
+  await expect(
+    page.getByRole("spinbutton", { name: "Temperature", exact: true }),
+  ).toBeDisabled();
+});
+
+test("named voice and speech choices can be tried directly in Playground without saving", async ({
+  page,
+}) => {
+  const state = await installFixture(page);
+  await page.goto("/playground");
+  await page.getByText("Voice and model choices", { exact: true }).click();
+  await page
+    .getByRole("combobox", { name: "OpenRouter model", exact: true })
+    .selectOption("anthropic/claude-haiku-5.5");
+  await page
+    .getByRole("searchbox", { name: "Find a voice", exact: true })
+    .fill("bright");
+  await page
+    .getByRole("combobox", { name: "Voice", exact: true })
+    .selectOption({ label: "Ashley · en-US" });
+  await page
+    .getByRole("combobox", { name: "Voice model", exact: true })
+    .selectOption("inworld-tts-2-flash");
+  await expect(
+    page.getByRole("combobox", { name: "Delivery", exact: true }),
+  ).toBeDisabled();
+  await page
+    .getByRole("combobox", { name: "Soniox model", exact: true })
+    .selectOption("stt-rt-v4");
+  await page
+    .getByRole("button", { name: "Inspect AI Inputs", exact: true })
+    .click();
+  await expect
+    .poll(() => state.previewRequest?.overrides?.voice?.inworld_voice)
+    .toBe("voice-custom-ashley");
+  await page
+    .getByRole("button", { name: "Close Preview", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Text", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Start Text Practice", exact: true })
+    .click();
+  await expect.poll(() => state.practiceStarts).toBe(1);
+  expect(state.practiceRequest.overrides.voice).toMatchObject({
+    dialogue_model: "anthropic/claude-haiku-5.5",
+    dialogue_temperature: null,
+    reasoning_effort: "none",
+    inworld_voice: "voice-custom-ashley",
+    inworld_model: "inworld-tts-2-flash",
+    soniox_model: "stt-rt-v4",
+  });
+  expect(state.records.global.revision).toBe(1);
+  expect(state.started).toBe(0);
+  await expect(
+    page.getByRole("combobox", { name: "OpenRouter model", exact: true }),
+  ).toBeDisabled();
+  await page.getByRole("button", { name: "End Practice", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Reset Practice Choices", exact: true })
+    .click();
+  await expect(
+    page.getByRole("combobox", { name: "OpenRouter model", exact: true }),
+  ).toHaveValue("google/gemini-3.1-flash-lite");
+  await page
+    .getByRole("combobox", { name: "OpenRouter model", exact: true })
+    .selectOption("openai/gpt-6-luna");
+  await page
+    .getByRole("button", { name: "Inspect AI Inputs", exact: true })
+    .click();
+  await expect
+    .poll(() => state.previewRequest?.overrides?.voice?.dialogue_model)
+    .toBe("openai/gpt-6-luna");
+  await page
+    .getByRole("button", { name: "Close Preview", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Inspect Last Session", exact: true })
+    .click();
+  await expect(
+    page.getByRole("region", { name: "Call AI inputs" }),
+  ).toBeVisible();
+});

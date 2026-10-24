@@ -11,7 +11,6 @@ if TYPE_CHECKING:
     from app.models import ContextPacket
 
 Mode = Literal["voice", "text"]
-MAX_OUTPUT_TOKENS = 512
 CLOSING_RESERVE_SECONDS = 15
 FAREWELL_REPLY_SECONDS = 3
 CONNECTION_EVENT = "Internal connection event, not recipient speech: the call is connected. Give the approved greeting now."
@@ -63,10 +62,19 @@ def model_tools(mode: Mode = "voice") -> list[dict[str, Any]]:
 def model_options(config: AndroidConfig, mode: Mode = "voice") -> dict[str, Any]:
     options: dict[str, Any] = {
         "model": config.dialogue_model,
-        "max_tokens": MAX_OUTPUT_TOKENS,
-        "temperature": config.dialogue_temperature,
+        "max_tokens": config.dialogue_max_tokens,
     }
-    if config.reasoning_effort is not None:
+    supported = config.dialogue_supported_parameters
+    if supported is None:
+        from app.model_capabilities import reviewed_model
+
+        model = reviewed_model(config.dialogue_model)
+        supported = model["supported_parameters"] if model else None
+    if config.dialogue_temperature is not None and (
+        supported is None or "temperature" in supported
+    ):
+        options["temperature"] = config.dialogue_temperature
+    if config.reasoning_effort is not None and (supported is None or "reasoning" in supported):
         options["reasoning"] = {"effort": config.reasoning_effort}
     provider: dict[str, Any] = {}
     if mode == "voice":
@@ -161,7 +169,9 @@ def describe_inputs(
             if config.tts_transport == "inworld"
             else config.tts_model,
             "voice": config.inworld_voice if config.tts_transport == "inworld" else config.voice,
-            "delivery_mode": config.inworld_delivery_mode,
+            "delivery_mode": config.inworld_delivery_mode
+            if config.inworld_model == "inworld-tts-2"
+            else None,
             "inworld_language": "Automatic",
             "inworld_encoding": "PCM",
             "inworld_sample_rate": 8000,

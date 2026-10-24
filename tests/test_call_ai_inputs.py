@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import httpx
 import httpx2
+import pytest
 import respx
 from openai import DefaultAsyncHttpxClient
 from pipecat.adapters.schemas.function_schema import FunctionSchema
@@ -67,7 +68,18 @@ async def test_preview_includes_tools_and_model_parameters_without_the_hermes_gu
     assert "openrouter_key_file" not in json.dumps(data)
 
 
-async def test_request_capture_matches_the_actual_sdk_body_and_has_no_headers(android):
+@pytest.mark.parametrize(
+    "model,temperature",
+    [
+        ("google/gemini-3.1-flash-lite", 0.4),
+        ("openai/gpt-6-luna", 0.4),
+        ("anthropic/claude-haiku-5.5", None),
+        ("openai/gpt-4.1-mini", None),
+    ],
+)
+async def test_request_capture_matches_the_actual_sdk_body_and_has_no_headers(
+    android, model, temperature
+):
     trace = ModelRequestTrace()
     requests = []
 
@@ -80,7 +92,9 @@ async def test_request_capture_matches_the_actual_sdk_body_and_has_no_headers(an
     client = DefaultAsyncHttpxClient(
         transport=httpx2.MockTransport(respond), event_hooks={"request": [trace.capture]}
     )
-    config = android.service.config
+    config = android.service.config.model_copy(
+        update={"dialogue_model": model, "dialogue_temperature": temperature}
+    )
     options = model_options(config)
     tool = model_tools()[0]["function"]
     service = OpenRouterVoiceLLMService(
@@ -89,7 +103,7 @@ async def test_request_capture_matches_the_actual_sdk_body_and_has_no_headers(an
         settings=OpenRouterVoiceLLMService.Settings(
             model=options["model"],
             max_tokens=options["max_tokens"],
-            temperature=options["temperature"],
+            **({"temperature": options["temperature"]} if "temperature" in options else {}),
             provider=OpenRouterVoiceLLMService.ProviderPreferences(**options["provider"]),
             extra={"extra_body": {"reasoning": options["reasoning"]}}
             if "reasoning" in options
@@ -116,6 +130,10 @@ async def test_request_capture_matches_the_actual_sdk_body_and_has_no_headers(an
         assert actual["body"] == json.loads(requests[0].content)
         for key, value in options.items():
             assert actual["body"][key] == value
+        if "temperature" not in options:
+            assert "temperature" not in actual["body"]
+        if "reasoning" not in options:
+            assert "reasoning" not in actual["body"]
         assert actual["body"]["tools"] == model_tools()
         assert actual["body"]["messages"] == messages
         messages[0]["content"] = "Later history changed"

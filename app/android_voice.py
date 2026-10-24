@@ -277,7 +277,7 @@ class AndroidVoiceSession:
             settings=OpenRouterVoiceLLMService.Settings(
                 model=options["model"],
                 max_tokens=options["max_tokens"],
-                temperature=options["temperature"],
+                **({"temperature": options["temperature"]} if "temperature" in options else {}),
                 extra={
                     "extra_body": {"reasoning": options["reasoning"]}
                     if "reasoning" in options

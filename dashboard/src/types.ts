@@ -8,7 +8,8 @@ export interface Voice {
   dialogue_provider: string | null;
   dialogue_fallback_providers: string[];
   reasoning_effort: string | null;
-  dialogue_temperature: number;
+  dialogue_temperature: number | null;
+  dialogue_max_tokens?: number;
   soniox_model: string;
   soniox_turn_detection: "semantic" | "vad";
   soniox_endpoint_delay_ms: number;
@@ -149,7 +150,7 @@ export interface AIInputContract {
   }[];
   model_options: {
     model: string;
-    temperature: number;
+    temperature?: number;
     max_tokens: number;
     [key: string]: unknown;
   };

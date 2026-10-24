@@ -98,16 +98,49 @@ without applying them. Browser timings do not establish cellular carrier or hand
 Calls support transcript search, filters, pagination, notes, quality tags, and authenticated files.
 Notes never alter the original transcript. MP3 responses support byte ranges; Markdown downloads
 have an explicit `.md` filename. Neither file type has automatic retention cleanup.
-Inworld voice choices and tool-capable OpenRouter model choices are fetched server-side and cached.
-The current selection remains usable if a provider catalog cannot be loaded.
+Personalities and Playground use native dropdowns for OpenRouter models, named Inworld voices,
+Inworld TTS-2 or TTS-2 Flash, and compatible Soniox real-time models. Search voices by name,
+language, or description. Soniox aliases are labelled with their underlying engine; async models
+are excluded. The current provider accounts remain in use. No new credentials are required.
+
+The server fetches provider catalogs and caches each list independently for one hour. Model choices
+require tools and tool-choice support; temperature support is not required. This includes GPT-6 Luna,
+Claude Haiku 5.5, and supported Gemini alternatives. Listed prices come from OpenRouter's catalog;
+they are per million tokens and can vary by provider. Catalog failures retain prior choices and the
+current selection. Reviewed metadata provides an outage fallback for the default and named models.
+An unknown model without usable catalog metadata is rejected before starting a conversation.
+Catalog sources: [OpenRouter models](https://openrouter.ai/api/v1/models),
+[Soniox model metadata](https://soniox.com/docs/api-reference/stt/get_models), and
+[Inworld TTS models](https://docs.inworld.ai/tts/tts-models).
+
+Changing models clears provider pins and keeps reasoning Off. Models that require reasoning show
+an explicit warning; saving or practice fails until the owner chooses a supported effort. Provider
+default is a separate, explicit choice and can enable thinking. Temperature can be disabled; unsupported
+temperature and reasoning fields are omitted from the actual requests. The maximum output-token
+budget is editable from 64 to 16384, including any reasoning tokens; the unchanged default is 512.
+TTS-2 Flash does not apply delivery modes, so that control is disabled while the TTS-2 preference is retained.
+
+Playground's **Voice and model choices** apply temporary session overrides without saving a revision.
+They take precedence over the selected personality and any unsaved editor draft. Inspect AI Inputs
+and both voice/text practice use these same overrides. After practice, Inspect Last Session retains
+access to the captured request; Inspect AI Inputs previews the current selection. Reset Practice Choices restores the selected
+personality's values. Starting a session freezes its settings and disables editing until it ends.
+Save in Personalities to apply a choice to future calls. Existing prepared and active calls retain their
+resolved model capabilities, parameters, prompt, and voice snapshot; catalog refreshes cannot rewrite them.
+Catalog I/O and validation happen before the conversation, never inside the audio loop.
+
+The selector release also passed live-provider browser practice with Haiku 5.5, Ashley,
+TTS-2 Flash, and Soniox's v4 alias, followed by GPT-6 Luna text practice. Captured outgoing
+requests had reasoning Off and no temperature. This used synthetic microphone input,
+kept saved revisions unchanged, and placed no telephone call. It is not handset latency evidence.
 
 Run `npm ci`, `npm run build`, and `npm test` from `dashboard/` for frontend verification.
 Browser tests use synthetic records and intercepted APIs; they cannot place a telephone call.
 `Dockerfile.control-tests` provides an isolated Linux WebKit environment when the local runtime
 is unavailable. Run it with no external network after building its dependencies.
 Provider-backed browser acceptance uses synthetic microphone audio, not an unattended real microphone.
-The control-panel gate passed 965 backend tests with two skips and 89.07% coverage.
-Forty-eight browser checks cover Chromium, dark appearance, desktop WebKit, and phone WebKit.
+The control-panel gate passed 974 backend tests with two skips and 89.06% coverage.
+Fifty-six browser checks cover Chromium, dark appearance, desktop WebKit, and phone WebKit.
 They include the local audio handshake, microphone release, permission denial, and stable pagination.
 The production image also removes Caddy's file capability so it runs with all Linux capabilities dropped.
 A provider-backed browser replay completed four languages and interruptions. Four measured reply starts

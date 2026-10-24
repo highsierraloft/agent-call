@@ -563,6 +563,7 @@ async def test_provider_catalogs_are_filtered_cached_and_keep_keys_private(panel
     key = tmp_path / "inworld-key"
     key.write_text("private-test-provider-value-long-enough")
     panel.h.service.config.inworld_key_file = key
+    panel.h.service.config.soniox_key_file = key
     with respx.mock as mock:
         voices = mock.get("https://api.inworld.ai/voices/v1/voices").respond(
             200,
@@ -586,7 +587,30 @@ async def test_provider_catalogs_are_filtered_cached_and_keep_keys_private(panel
                         "name": "Tool model",
                         "supported_parameters": ["tools", "tool_choice", "temperature"],
                     },
+                    {
+                        "id": "openai/gpt-6-luna",
+                        "name": "GPT-6 Luna",
+                        "supported_parameters": ["tools", "tool_choice", "reasoning"],
+                        "reasoning": {"mandatory": False, "supported_efforts": ["none", "low"]},
+                    },
                     {"id": "example/unsupported", "supported_parameters": []},
+                ]
+            },
+        )
+        speech = mock.get("https://api.soniox.com/v1/models").respond(
+            200,
+            json={
+                "models": [
+                    {
+                        "id": "stt-rt-v5",
+                        "name": "Real-time v5",
+                        "transcription_mode": "real_time",
+                        "supports_max_endpoint_delay": True,
+                        "supports_endpoint_sensitivity": True,
+                        "supports_endpoint_latency_adjustment": True,
+                        "endpoint_latency_adjustment_max_level": 3,
+                    },
+                    {"id": "stt-async-v5", "transcription_mode": "async"},
                 ]
             },
         )
@@ -594,7 +618,10 @@ async def test_provider_catalogs_are_filtered_cached_and_keep_keys_private(panel
         second = await panel.client.get("/admin/api/catalog")
     assert first.status_code == 200 and first.json() == second.json()
     assert first.json()["voices"][0]["id"] == "Wade"
-    assert [m["id"] for m in first.json()["models"]] == ["example/tool-model"]
+    assert {m["id"] for m in first.json()["models"]} == {"example/tool-model", "openai/gpt-6-luna"}
+    assert [m["id"] for m in first.json()["stt_models"]] == ["stt-rt-v5"]
+    assert speech.call_count == 1
+    assert len(first.json()["tts_models"]) == 2
     assert voices.call_count == 1 and models.call_count == 1
     assert key.read_text() not in first.text and "Authorization" not in first.text
 
@@ -606,3 +633,120 @@ async def test_catalog_failure_does_not_change_saved_settings(panel):
         response = await panel.client.get("/admin/api/catalog")
     assert response.status_code == 200 and response.json()["errors"]
     assert await panel.h.service.control.current("global") == before
+
+
+@pytest.mark.parametrize("model", ["openai/gpt-6-luna", "anthropic/claude-haiku-5.5"])
+async def test_model_capabilities_and_nullable_temperature_are_frozen_for_future_calls(
+    android, model
+):
+    from app.call_ai_inputs import model_options
+
+    c = android.service.control
+    old_plan = await prepare(android)
+    old_snapshot = await android.service.db.control_plan(old_plan.plan_id)
+    row = await c.current("global")
+    row["value"]["voice"].update(
+        dialogue_model=model,
+        dialogue_provider=None,
+        dialogue_fallback_providers=[],
+        dialogue_temperature=None,
+    )
+    await c.save("global", row["value"], row["revision"], "owner")
+    new_plan = await prepare(android)
+    frozen = await android.service.db.control_plan(new_plan.plan_id)
+    assert frozen["model_capabilities"]["id"] == model
+    assert "temperature" not in model_options(c.runtime_config(frozen))
+    assert model_options(c.runtime_config(frozen))["reasoning"] == {"effort": "none"}
+    assert await android.service.db.control_plan(old_plan.plan_id) == old_snapshot
+    row = await c.current("global")
+    row["value"]["voice"]["dialogue_max_tokens"] = 1024
+    await c.save("global", row["value"], row["revision"], "owner")
+    assert model_options(c.runtime_config(frozen))["max_tokens"] == 512
+
+
+async def test_mandatory_reasoning_is_rejected_until_owner_selects_supported_level(panel):
+    row = (await panel.client.get("/admin/api/configuration/global")).json()
+    row["value"]["voice"].update(dialogue_model="google/gemini-3.8-flash", reasoning_effort="none")
+    response = await panel.client.put(
+        "/admin/api/configuration/global",
+        json={"expected_revision": row["revision"], "value": row["value"]},
+    )
+    assert response.status_code == 422
+    assert "does not support reasoning" in response.text
+    row["value"]["voice"].update(reasoning_effort="low", dialogue_max_tokens=4096)
+    response = await panel.client.put(
+        "/admin/api/configuration/global",
+        json={"expected_revision": row["revision"], "value": row["value"]},
+    )
+    assert response.status_code == 200
+    snapshot = await panel.h.service.control.resolve(panel.h.packet)
+    panel.h.service.control.freeze_inputs(panel.h.packet, snapshot)
+    assert snapshot["ai_inputs"]["model_options"]["reasoning"] == {"effort": "low"}
+    assert snapshot["ai_inputs"]["model_options"]["max_tokens"] == 4096
+
+
+async def test_practice_choices_override_profile_without_saving_or_dialing(panel):
+    panel.h.service.config.tts_transport = "inworld"
+    before = await panel.h.service.control.current("global")
+    response = await panel.client.post(
+        "/admin/api/prompt-preview",
+        json={
+            "context": panel.h.packet.model_dump(mode="json"),
+            "overrides": {
+                "voice": {
+                    "dialogue_model": "openai/gpt-6-luna",
+                    "dialogue_temperature": None,
+                    "dialogue_provider": None,
+                    "dialogue_fallback_providers": [],
+                    "inworld_voice": "Ashley",
+                    "inworld_model": "inworld-tts-2-flash",
+                }
+            },
+        },
+    )
+    assert response.status_code == 200
+    inputs = response.json()["configured"]
+    assert inputs["model_options"]["model"] == "openai/gpt-6-luna"
+    assert "temperature" not in inputs["model_options"]
+    assert inputs["speech_settings"]["voice"] == "Ashley"
+    assert inputs["speech_settings"]["delivery_mode"] is None
+    assert await panel.h.service.control.current("global") == before
+    assert not panel.h.asterisk.dials
+
+
+async def test_unknown_models_fail_closed_and_cached_capabilities_survive_provider_failure(android):
+    catalog = android.service.control.catalog
+    with respx.mock as mock:
+        route = mock.get("https://openrouter.ai/api/v1/models").respond(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "example/no-temperature",
+                        "name": "Test",
+                        "supported_parameters": ["tools", "tool_choice"],
+                        "reasoning": {},
+                    }
+                ]
+            },
+        )
+        model = await catalog.model("example/no-temperature")
+        assert "temperature" not in model["supported_parameters"]
+        route.respond(503)
+        catalog._cache["models"] = (0, catalog._cache["models"][1])
+        assert await catalog.model("example/no-temperature") == model
+        with pytest.raises(ValueError, match="Model unavailable"):
+            await catalog.model("example/missing")
+
+
+async def test_non_reasoning_model_does_not_accept_thinking_and_speech_models_are_validated(
+    android,
+):
+    c = android.service.control
+    row = await c.current("global")
+    row["value"]["voice"].update(dialogue_model="openai/gpt-4.1-mini", reasoning_effort="low")
+    with pytest.raises(ValueError, match="does not support reasoning"):
+        await c.save("global", row["value"], row["revision"], "owner")
+    row["value"]["voice"].update(reasoning_effort="none", inworld_model="invented-model")
+    with pytest.raises(ValueError, match="Select Inworld"):
+        await c.save("global", row["value"], row["revision"], "owner")

@@ -19,8 +19,11 @@ class VoiceSettings(BaseModel):
     dialogue_model: str = Field(min_length=1, max_length=160)
     dialogue_provider: str | None = Field(default=None, max_length=120)
     dialogue_fallback_providers: list[str] = Field(default_factory=list, max_length=4)
-    reasoning_effort: Literal["none", "minimal", "low", "medium", "high"] | None = "none"
-    dialogue_temperature: float = Field(default=0.4, ge=0, le=2)
+    reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"] | None = (
+        "none"
+    )
+    dialogue_temperature: float | None = Field(default=0.4, ge=0, le=2)
+    dialogue_max_tokens: int = Field(default=512, ge=64, le=16384)
     soniox_model: str = Field(default="stt-rt-v5", min_length=1, max_length=100)
     soniox_turn_detection: Literal["semantic", "vad"] = "semantic"
     soniox_endpoint_delay_ms: int = Field(default=500, ge=500, le=3000)

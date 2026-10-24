@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { api, message } from "./api";
 import AIInputs from "./AIInputs";
+import VoiceFields from "./VoiceFields";
 import {
   languages,
   sampleBrief,
@@ -25,6 +26,9 @@ import {
   type Language,
   type Intention,
   type AIInputInspection,
+  type Profile,
+  type Revision,
+  type Voice,
 } from "./types";
 
 export default function Playground({
@@ -52,7 +56,33 @@ export default function Playground({
     [busy, setBusy] = useState(false),
     [text, setText] = useState(""),
     [partial, setPartial] = useState(""),
-    [preview, setPreview] = useState<AIInputInspection | null>(null);
+    [preview, setPreview] = useState<AIInputInspection | null>(null),
+    [previewLastSession, setPreviewLastSession] = useState(false);
+  const [voiceOverrides, setVoiceOverrides] = useState<Partial<Voice>>({});
+  const [profileVoice, setProfileVoice] = useState<Voice>(
+    session.setup.defaults,
+  );
+  const [settingsReady, setSettingsReady] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    setSettingsReady(false);
+    setVoiceOverrides({});
+    api<Revision<Profile>>("/configuration/profile:" + brief.profile_id)
+      .then((record) => {
+        if (!alive) return;
+        setProfileVoice({
+          ...(draft?.global?.voice || session.setup.defaults),
+          ...(draft?.profile || record.value).voice_overrides,
+        });
+        setSettingsReady(true);
+      })
+      .catch((e) => {
+        if (alive) setError(message(e));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [brief.profile_id, draft, session.setup.defaults]);
   const client = useRef<PipecatClient | null>(null),
     id = useRef<string | null>(null),
     alive = useRef(true),
@@ -106,13 +136,14 @@ export default function Playground({
     const timer = setInterval(poll, 1200);
     return () => clearInterval(timer);
   }, [practice?.id, practice?.state]);
-  const overrides = () =>
-    draft
-      ? {
-          ...(draft.global ? { global: draft.global } : {}),
-          ...(draft.profile ? { profile: draft.profile } : {}),
-        }
-      : undefined;
+  const overrides = () => {
+    const value = {
+      ...(draft?.global ? { global: draft.global } : {}),
+      ...(draft?.profile ? { profile: draft.profile } : {}),
+      ...(Object.keys(voiceOverrides).length ? { voice: voiceOverrides } : {}),
+    };
+    return Object.keys(value).length ? value : undefined;
+  };
   async function start() {
     let connectionTimer: ReturnType<typeof setTimeout> | undefined;
     setError("");
@@ -249,16 +280,21 @@ export default function Playground({
       setBusy(false);
     }
   }
-  async function showPrompt() {
+  async function showSessionInputs() {
+    if (!practice) return;
     try {
-      if (practice?.id) {
-        setPreview(
-          await api<AIInputInspection>(
-            "/practice/" + practice.id + "/ai-inputs",
-          ),
-        );
-        return;
-      }
+      setPreview(
+        await api<AIInputInspection>("/practice/" + practice.id + "/ai-inputs"),
+      );
+      setPreviewLastSession(true);
+    } catch (e) {
+      setError(message(e));
+    }
+  }
+  async function showPrompt() {
+    if (running) return showSessionInputs();
+    try {
+      setPreviewLastSession(false);
       const r = await api<AIInputInspection>("/prompt-preview", "POST", {
         mode,
         context: { ...brief, max_duration_seconds: undefined },
@@ -275,7 +311,6 @@ export default function Playground({
   return (
     <div className="playground-layout">
       <aside className="practice-setup">
-        <span className="eyebrow">NO PHONE NUMBER NEEDED</span>
         <h2>Try a conversation</h2>
         <p className="muted">
           Use the same prompts and providers. Practice never places a telephone
@@ -354,6 +389,31 @@ export default function Playground({
               }
             />
           </label>
+          <details className="practice-model-settings">
+            <summary>Voice and model choices</summary>
+            <p className="muted">
+              These choices apply only to this practice session. Save changes in
+              Personalities to use them for calls.
+            </p>
+            {settingsReady ? (
+              <VoiceFields
+                value={voiceOverrides}
+                base={profileVoice}
+                onChange={(v) => {
+                  setVoiceOverrides(v);
+                  setPreview(null);
+                }}
+                practice
+              />
+            ) : (
+              <p role="status">Loading personality settings…</p>
+            )}
+            {!!Object.keys(voiceOverrides).length && (
+              <button type="button" onClick={() => setVoiceOverrides({})}>
+                Reset Practice Choices
+              </button>
+            )}
+          </details>
           <div className="segmented" role="group" aria-label="Practice mode">
             <button
               type="button"
@@ -382,7 +442,7 @@ export default function Playground({
           ) : (
             <button
               className="primary"
-              disabled={busy || blocked}
+              disabled={busy || blocked || !settingsReady}
               onClick={start}
             >
               {mode === "voice" ? (
@@ -397,10 +457,13 @@ export default function Playground({
                   : "Start Text Practice"}
             </button>
           )}
-          <button onClick={showPrompt}>
+          <button onClick={showPrompt} disabled={!practice && !settingsReady}>
             <FileText size={15} />
             Inspect AI Inputs
           </button>
+          {practice && !running && (
+            <button onClick={showSessionInputs}>Inspect Last Session</button>
+          )}
         </div>
         {blocked && (
           <p className="muted">
@@ -455,7 +518,7 @@ export default function Playground({
           <AIInputs
             data={preview}
             onClose={() => setPreview(null)}
-            onRefresh={showPrompt}
+            onRefresh={previewLastSession ? showSessionInputs : showPrompt}
           />
         )}
         <div className="practice-turns" aria-live="polite">

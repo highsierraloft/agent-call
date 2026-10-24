@@ -7,6 +7,7 @@ export const voice = {
   dialogue_fallback_providers: ["google-vertex"],
   reasoning_effort: "none",
   dialogue_temperature: 0.4,
+  dialogue_max_tokens: 512,
   soniox_model: "stt-rt-v5",
   soniox_turn_detection: "semantic",
   soniox_endpoint_delay_ms: 500,
@@ -78,6 +79,8 @@ export async function installFixture(page: Page) {
     ended: 0,
     paginate: false,
     practiceStarts: 0,
+    practiceRequest: null as any,
+    previewRequest: null as any,
     practiceStops: 0,
     onPracticeStop: null as null | (() => void),
     practice: null as any,
@@ -267,6 +270,104 @@ export async function installFixture(page: Page) {
           !["stopped", "failed"].includes(state.practice.state),
         last_hermes_request: null,
       });
+    if (path === "/catalog")
+      return respond({
+        voices: [
+          {
+            id: "Wade",
+            name: "Wade",
+            description: "Casual and relaxed",
+            language: "en-US",
+          },
+          {
+            id: "voice-custom-ashley",
+            name: "Ashley",
+            description: "Warm and bright",
+            language: "en-US",
+          },
+        ],
+        models: [
+          {
+            id: "google/gemini-3.1-flash-lite",
+            name: "Google: Gemini 3.1 Flash Lite",
+            supported_parameters: [
+              "tools",
+              "tool_choice",
+              "temperature",
+              "reasoning",
+            ],
+            reasoning: {
+              mandatory: false,
+              supported_efforts: ["none", "minimal", "low", "medium", "high"],
+            },
+          },
+          {
+            id: "openai/gpt-6-luna",
+            name: "OpenAI: GPT-6 Luna",
+            supported_parameters: ["tools", "tool_choice", "reasoning"],
+            reasoning: {
+              mandatory: false,
+              supported_efforts: [
+                "none",
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max",
+              ],
+            },
+          },
+          {
+            id: "anthropic/claude-haiku-5.5",
+            name: "Anthropic: Claude Haiku 5.5",
+            supported_parameters: ["tools", "tool_choice", "reasoning"],
+            reasoning: {
+              mandatory: false,
+              supported_efforts: ["none", "low", "medium", "high"],
+            },
+          },
+          {
+            id: "google/gemini-3.8-flash",
+            name: "Google: Gemini 3.8 Flash",
+            supported_parameters: [
+              "tools",
+              "tool_choice",
+              "temperature",
+              "reasoning",
+            ],
+            reasoning: {
+              mandatory: true,
+              supported_efforts: ["low", "medium", "high"],
+            },
+          },
+        ],
+        stt_models: [
+          {
+            id: "stt-rt-v5",
+            name: "Speech-to-Text Real-time v5",
+            max_latency_level: 3,
+          },
+          {
+            id: "stt-rt-v4",
+            name: "Real-time v4",
+            aliased_model_id: "stt-rt-v5",
+            max_latency_level: 3,
+          },
+        ],
+        tts_models: [
+          {
+            id: "inworld-tts-2",
+            name: "Inworld TTS-2 · expressive",
+            supports_delivery: true,
+          },
+          {
+            id: "inworld-tts-2-flash",
+            name: "Inworld TTS-2 Flash · faster",
+            supports_delivery: false,
+          },
+        ],
+        errors: [],
+      });
     if (path === "/profiles")
       return respond(
         Object.entries(records)
@@ -301,7 +402,8 @@ export async function installFixture(page: Page) {
         return respond(records[entity]);
       }
     }
-    if (path === "/prompt-preview")
+    if (path === "/prompt-preview") {
+      state.previewRequest = body;
       return respond({
         ...inspect(
           body.overrides?.profile?.prompt ||
@@ -316,6 +418,7 @@ export async function installFixture(page: Page) {
           body.context.objective,
         configuration: snapshot,
       });
+    }
     if (path === "/integration")
       return respond({
         setup: setup(),
@@ -459,6 +562,7 @@ export async function installFixture(page: Page) {
     }
     if (path === "/practice" && method === "POST") {
       state.practiceStarts++;
+      state.practiceRequest = body;
       state.practice = {
         id: "practice_local",
         mode: body.mode,
