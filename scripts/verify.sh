@@ -11,7 +11,7 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-uv run ruff format --check app tests scripts
-uv run ruff check app tests scripts
-uv run mypy app
-uv run pytest -q --cov=app
+uv run --extra android --frozen ruff format --check app tests scripts
+uv run --extra android --frozen ruff check app tests scripts
+uv run --extra android --frozen mypy app
+uv run --extra android --frozen pytest -q --cov=app

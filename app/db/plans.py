@@ -49,17 +49,38 @@ class PlansMixin:
         context: dict[str, Any],
         authority_basis: str | None,
         expires_at: datetime,
+        configuration_snapshot: dict[str, Any] | None = None,
     ) -> None:
         now = _iso_now()
-        await self.execute(
-            """INSERT INTO plans
-               (plan_id, state, context_json, authority_basis, created_at, expires_at)
-               VALUES (?, 'prepared', ?, ?, ?, ?)""",
-            (plan_id, json.dumps(context), authority_basis, now, expires_at.isoformat()),
-        )
+        async with self._immediate_transaction() as conn:
+            await conn.execute(
+                "INSERT INTO plans (plan_id,state,context_json,authority_basis,created_at,expires_at) "
+                "VALUES (?,'prepared',?,?,?,?)",
+                (
+                    plan_id,
+                    json.dumps(
+                        {key: value for key, value in context.items() if key != "profile_id"}
+                    ),
+                    authority_basis,
+                    now,
+                    expires_at.isoformat(),
+                ),
+            )
+            if configuration_snapshot is not None:
+                await conn.execute(
+                    "INSERT INTO plan_configurations VALUES (?,?)",
+                    (plan_id, json.dumps(configuration_snapshot, ensure_ascii=False)),
+                )
 
     async def get_plan(self: DatabaseAccess, plan_id: str) -> dict[str, Any] | None:
-        return await self.fetch_one("SELECT * FROM plans WHERE plan_id = ?", (plan_id,))
+        row = await self.fetch_one(
+            "SELECT p.*, c.snapshot_json FROM plans p LEFT JOIN plan_configurations c USING(plan_id) WHERE p.plan_id=?",
+            (plan_id,),
+        )
+        if row is not None:
+            snapshot = json.loads(row["snapshot_json"]) if row.get("snapshot_json") else {}
+            row["context"]["profile_id"] = snapshot.get("profile_id")
+        return row
 
     async def get_plan_record(self: DatabaseAccess, plan_id: str) -> PlanRecord | None:
         """Typed adapter over the same read used by :meth:`get_plan`."""

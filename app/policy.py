@@ -42,7 +42,9 @@ def validate_destination(phone: str, settings: Settings) -> PolicyDecision:
     normalized = phonenumbers.format_number(parsed, PhoneNumberFormat.E164)
     if normalized != phone or not phonenumbers.is_possible_number(parsed):
         return PolicyDecision(False, "invalid_e164", "Destination must be valid E.164")
-    if not any(phone.startswith(prefix) for prefix in settings.allowed_country_codes):
+    if not settings.allow_all_country_codes and not any(
+        phone.startswith(prefix) for prefix in settings.allowed_country_codes
+    ):
         return PolicyDecision(
             False,
             "country_not_allowed",
@@ -91,6 +93,20 @@ def validate_context(packet: ContextPacket, settings: Settings) -> list[PolicyDe
         *packet.allowed_commitments,
         *packet.prohibited_actions,
     ]
+    if packet.business:
+        text_fields.extend(
+            value
+            for value in [
+                packet.business.name,
+                packet.business.description,
+                packet.business.offer,
+                packet.business.desired_next_step,
+                packet.business.audience,
+                packet.business.pricing,
+                *packet.business.approved_claims,
+            ]
+            if value
+        )
     if any(SENSITIVE_PATTERNS.search(value) for value in text_fields):
         errors.append(
             PolicyDecision(

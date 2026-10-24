@@ -47,7 +47,10 @@ TERMINAL_STATES = {
 class OwnerContext(BaseModel):
     display_name: str = Field(min_length=1, max_length=120)
     timezone: str = Field(min_length=1, max_length=80)
-    callback_number: E164
+    callback_number: E164 | Literal["configured"] = Field(
+        default="configured",
+        description="Omit to use the server's saved owner number. Never use the recipient number here.",
+    )
 
 
 class TargetContext(BaseModel):
@@ -58,7 +61,23 @@ class TargetContext(BaseModel):
 
 class EscalationContext(BaseModel):
     mode: Literal["transfer_to_owner", "end_call"]
-    owner_phone: E164
+    owner_phone: E164 | Literal["configured"] = Field(
+        default="configured",
+        description="Omit to use the server's saved owner number, including when mode is end_call.",
+    )
+
+
+class BusinessContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    description: str | None = Field(default=None, min_length=1, max_length=2000)
+    offer: str | None = Field(default=None, min_length=1, max_length=2000)
+    desired_next_step: str | None = Field(default=None, min_length=1, max_length=1000)
+    contact_permission: Literal["recipient_requested", "prior_consent"] | None = None
+    audience: str | None = Field(default=None, max_length=1000)
+    approved_claims: list[str] = Field(default_factory=list, max_length=30)
+    pricing: str | None = Field(default=None, max_length=1000)
 
 
 class ContextPacket(BaseModel):
@@ -67,6 +86,12 @@ class ContextPacket(BaseModel):
     owner: OwnerContext
     target: TargetContext
     objective: str = Field(min_length=1, max_length=4000)
+    language: Literal["en", "es", "ru", "uk"] | None = None
+    intention: Literal["task", "conversation", "sales", "roleplay", "prank"] = "task"
+    personality: Literal["professional", "warm", "salesperson", "playful"] = "warm"
+    profile_id: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$")
+    business: BusinessContext | None = None
+    max_duration_seconds: int | None = Field(default=None, ge=30, le=7200)
     relevant_facts: list[str] = Field(default_factory=list, max_length=100)
     preferences: list[str] = Field(default_factory=list, max_length=100)
     hard_constraints: list[str] = Field(default_factory=list, max_length=100)
@@ -195,7 +220,7 @@ class StoredCallResult(BaseModel):
         description="Telephony lifecycle status; completed means the call ended, not task success."
     )
     finalization_status: Literal["succeeded", "failed", "telephony_only"] = Field(
-        description="Result extraction status; succeeded does not mean the call objective succeeded."
+        description="Result persistence/extraction status; succeeded does not mean the call objective succeeded."
     )
     outcome: Literal[
         "completed",
@@ -214,7 +239,11 @@ class StoredCallResult(BaseModel):
         )
     )
     result_source: Literal[
-        "realtime_tool", "post_call_extractor", "telephony_only", "extraction_failed"
+        "realtime_tool",
+        "post_call_extractor",
+        "telephony_only",
+        "extraction_failed",
+        "transcript_only",
     ]
     summary: str
     commitments: list[Commitment] = Field(default_factory=list)

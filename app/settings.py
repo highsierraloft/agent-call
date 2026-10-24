@@ -128,6 +128,7 @@ class Settings(BaseSettings):
     )
 
     openai_api_key: SecretStr | None = None
+    call_backend: Literal["twilio_openai", "android_openrouter"] = "twilio_openai"
     openai_webhook_secret: SecretStr | None = None
     openai_project_id: str | None = None
     exa_api_key: SecretStr | None = None
@@ -153,6 +154,7 @@ class Settings(BaseSettings):
     hold_max_seconds: float = Field(default=300.0, gt=0, le=600)
     wait_for_call_event_max_seconds: float = Field(default=20.0, gt=0, le=25)
     allowed_country_codes: list[str] = Field(default_factory=lambda: ["+1"])
+    allow_all_country_codes: bool = False
     live_model: Literal["gpt-live-1"] = "gpt-live-1"
     live_voice: str = "marin"
     live_backend_model: Literal["gpt-5.6-terra"] = "gpt-5.6-terra"
@@ -162,6 +164,7 @@ class Settings(BaseSettings):
     openai_http_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
     openai_keepalive_expiry_seconds: float | None = Field(default=60.0, ge=5, le=300)
     openai_extraction_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+    post_call_extraction_enabled: bool = True
     extractor_model: str = "gpt-5.4-mini-2026-03-17"
     database_url: str = "sqlite:///./agent_call.db"
     public_base_url: str | None = None
@@ -389,8 +392,16 @@ class Settings(BaseSettings):
 
     def runtime_env_values(self) -> dict[str, object]:
         names: tuple[str, ...] = CORE_RUNTIME_ENV_NAMES
+        if self.call_backend == "android_openrouter":
+            names = (
+                "OWNER_PHONE_E164",
+                "ALLOWED_AGENT_USER_ID",
+                "MCP_BEARER_TOKEN",
+                "DEBUG_API_TOKEN",
+                "DEPLOY_GUARD_TOKEN",
+            )
         if self.mcp_oauth_enabled:
-            names = CORE_RUNTIME_ENV_NAMES + OAUTH_RUNTIME_ENV_NAMES
+            names = names + OAUTH_RUNTIME_ENV_NAMES
         return {name: getattr(self, name.lower()) for name in names}
 
     def require_runtime_configuration(self) -> None:

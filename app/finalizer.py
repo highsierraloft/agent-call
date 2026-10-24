@@ -75,7 +75,7 @@ class UnknownEvidenceError(ValueError):
 
 
 class Finalizer:
-    def __init__(self, settings: Settings, db: Database, openai: AsyncOpenAI):
+    def __init__(self, settings: Settings, db: Database, openai: AsyncOpenAI | None):
         self.settings = settings
         self.db = db
         self.openai = openai
@@ -131,6 +131,7 @@ class Finalizer:
             transcript = await self.db.get_transcript(call_id)
         call_status = self._call_status(call["state"])
         fatal_reasons = {
+            "android_",
             "sideband_error",
             "openai_fatal_error",
             "transcription_config_mismatch",
@@ -170,6 +171,18 @@ class Finalizer:
         )
         # This transaction occurs before the external extraction request.
         await self.db.save_result_with_transcript(call_id, fallback, transcript)
+
+        if not self.settings.post_call_extraction_enabled:
+            result = fallback.model_copy(
+                update={
+                    "finalization_status": "succeeded",
+                    "result_source": "transcript_only",
+                    "outcome": "failed" if call_status == "failed" else "unknown",
+                    "summary": "Call status and transcript are available for the requesting agent.",
+                }
+            )
+            await self.db.save_result_with_transcript(call_id, result, transcript)
+            return result
 
         try:
             plan = PlanRecord.from_row(plan_row)
@@ -240,6 +253,8 @@ class Finalizer:
     async def _extract(
         self, call: dict[str, Any], plan: PlanRecord, transcript: list[Any]
     ) -> tuple[ExtractedCallResult, tuple[int, int]]:
+        if self.openai is None:
+            raise RuntimeError("Post-call extraction is unavailable for this backend")
         # Normalize (but do not case-fold) turn_ids so an extractor citation padded with
         # incidental whitespace still validates; a matching stripped id is canonicalized
         # back to the exact transcript turn_id before being persisted.
