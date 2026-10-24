@@ -30,7 +30,10 @@ jobs:
           enable-cache: true
 
       - name: Install locked dependencies
-        run: uv sync --all-groups --frozen
+        run: uv sync --extra android --all-groups --frozen
+
+      - name: Install recording tools
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y ffmpeg
 
       - name: Verify application (shared gate)
         # Keep this identical to the deploy workflow's gate: both call

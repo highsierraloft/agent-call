@@ -15,7 +15,7 @@ into this repository. The upstream Fly deployment is outside this fork's scope.
 
 ## Build, Test, and Development Commands
 
-- `uv sync --all-groups --frozen`: install dependencies from `uv.lock`.
+- `uv sync --extra android --all-groups --frozen`: install the full fork's locked dependencies. Install FFmpeg/ffprobe for recording tests.
 - `uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload`: run the local service with reload.
 - `uv run ruff format --check app tests scripts`: verify formatting.
 - `uv run ruff check app tests scripts`: run configured lint and import checks.
