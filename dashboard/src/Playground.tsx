@@ -15,6 +15,7 @@ import {
 import { api, message } from "./api";
 import AIInputs from "./AIInputs";
 import VoiceFields from "./VoiceFields";
+import { SectionTabs, ActionMenu, SettingsDisclosure } from "./Controls";
 import {
   languages,
   sampleBrief,
@@ -57,7 +58,8 @@ export default function Playground({
     [text, setText] = useState(""),
     [partial, setPartial] = useState(""),
     [preview, setPreview] = useState<AIInputInspection | null>(null),
-    [previewLastSession, setPreviewLastSession] = useState(false);
+    [previewLastSession, setPreviewLastSession] = useState(false),
+    [settingsSection, setSettingsSection] = useState("voice");
   const [voiceOverrides, setVoiceOverrides] = useState<Partial<Voice>>({});
   const [profileVoice, setProfileVoice] = useState<Voice>(
     session.setup.defaults,
@@ -311,21 +313,38 @@ export default function Playground({
   return (
     <div className="playground-layout">
       <aside className="practice-setup">
-        <h2>Try a conversation</h2>
+        <h2>Practice Setup</h2>
         <p className="muted">
-          Use the same prompts and providers. Practice never places a telephone
-          call.
+          Try your agent with voice or text. No phone call is placed.
         </p>
         {draft && (
           <div className="draft-notice">
             <strong>Testing unsaved changes</strong>
-            <p>These settings have not been applied to real calls.</p>
             <button onClick={clearDraft} disabled={running}>
               Use Saved Settings
             </button>
           </div>
         )}
         <fieldset disabled={running || busy}>
+          <div className="segmented" role="group" aria-label="Practice mode">
+            <button
+              type="button"
+              aria-pressed={mode === "voice"}
+              onClick={() => setMode("voice")}
+            >
+              <Mic size={15} />
+              Voice
+            </button>
+            <button
+              type="button"
+              aria-pressed={mode === "text"}
+              onClick={() => setMode("text")}
+            >
+              <MessageSquare size={15} />
+              Text
+            </button>
+          </div>
+
           <label>
             Personality
             <select
@@ -361,77 +380,16 @@ export default function Playground({
             </select>
           </label>
           <label>
-            Purpose
-            <select
-              value={brief.intention}
-              onChange={(e) =>
-                setBrief((b) => ({
-                  ...b,
-                  intention: e.target.value as Intention,
-                }))
-              }
-            >
-              {["conversation", "task", "roleplay", "prank", "sales"].map(
-                (v) => (
-                  <option key={v}>{v}</option>
-                ),
-              )}
-            </select>
-          </label>
-          <label>
             Practice brief
             <textarea
               aria-label="Practice brief"
-              rows={5}
+              rows={3}
               value={brief.objective}
               onChange={(e) =>
                 setBrief((b) => ({ ...b, objective: e.target.value }))
               }
             />
           </label>
-          <details className="practice-model-settings">
-            <summary>Voice and model choices</summary>
-            <p className="muted">
-              These choices apply only to this practice session. Save changes in
-              Personalities to use them for calls.
-            </p>
-            {settingsReady ? (
-              <VoiceFields
-                value={voiceOverrides}
-                base={profileVoice}
-                onChange={(v) => {
-                  setVoiceOverrides(v);
-                  setPreview(null);
-                }}
-                practice
-              />
-            ) : (
-              <p role="status">Loading personality settings…</p>
-            )}
-            {!!Object.keys(voiceOverrides).length && (
-              <button type="button" onClick={() => setVoiceOverrides({})}>
-                Reset Practice Choices
-              </button>
-            )}
-          </details>
-          <div className="segmented" role="group" aria-label="Practice mode">
-            <button
-              type="button"
-              aria-pressed={mode === "voice"}
-              onClick={() => setMode("voice")}
-            >
-              <Mic size={15} />
-              Voice
-            </button>
-            <button
-              type="button"
-              aria-pressed={mode === "text"}
-              onClick={() => setMode("text")}
-            >
-              <MessageSquare size={15} />
-              Text
-            </button>
-          </div>
         </fieldset>
         <div className="practice-actions">
           {running ? (
@@ -457,13 +415,15 @@ export default function Playground({
                   : "Start Text Practice"}
             </button>
           )}
-          <button onClick={showPrompt} disabled={!practice && !settingsReady}>
-            <FileText size={15} />
-            Inspect AI Inputs
-          </button>
-          {practice && !running && (
-            <button onClick={showSessionInputs}>Inspect Last Session</button>
-          )}
+          <ActionMenu label="Inspect">
+            <button onClick={showPrompt} disabled={!practice && !settingsReady}>
+              <FileText size={15} />
+              Inspect AI Inputs
+            </button>
+            {practice && !running && (
+              <button onClick={showSessionInputs}>Inspect Last Session</button>
+            )}
+          </ActionMenu>
         </div>
         {blocked && (
           <p className="muted">
@@ -471,6 +431,71 @@ export default function Playground({
             practice.
           </p>
         )}
+        <fieldset
+          className="practice-model-settings"
+          disabled={running || busy}
+        >
+          <SettingsDisclosure
+            title="Conversation Purpose"
+            summary={brief.intention}
+          >
+            <label>
+              Purpose
+              <select
+                value={brief.intention}
+                onChange={(e) =>
+                  setBrief((b) => ({
+                    ...b,
+                    intention: e.target.value as Intention,
+                  }))
+                }
+              >
+                {["conversation", "task", "roleplay", "prank", "sales"].map(
+                  (v) => (
+                    <option key={v}>{v}</option>
+                  ),
+                )}
+              </select>
+            </label>
+          </SettingsDisclosure>
+          <SettingsDisclosure
+            title="Voice and model choices"
+            summary="Temporary choices for this session"
+          >
+            <p className="muted">
+              To use these choices for calls, save them in Personalities.
+            </p>
+            {settingsReady ? (
+              <SectionTabs
+                label="Practice settings"
+                value={settingsSection}
+                onChange={setSettingsSection}
+                items={[
+                  { id: "voice", label: "Voice & Model" },
+                  { id: "call", label: "Call Settings" },
+                ]}
+              >
+                <VoiceFields
+                  section={settingsSection as "voice" | "call"}
+                  value={voiceOverrides}
+                  base={profileVoice}
+                  onChange={(v) => {
+                    setVoiceOverrides(v);
+                    setPreview(null);
+                  }}
+                  practice
+                />
+              </SectionTabs>
+            ) : (
+              <p role="status">Loading personality settings…</p>
+            )}
+            {!!Object.keys(voiceOverrides).length && (
+              <button type="button" onClick={() => setVoiceOverrides({})}>
+                Reset Practice Choices
+              </button>
+            )}
+          </SettingsDisclosure>
+        </fieldset>
         <p className="caption muted">
           Provider usage applies. Browser audio does not include cellular
           carrier delay.
@@ -539,11 +564,11 @@ export default function Playground({
           {!practice?.messages.length && (
             <div className="empty">
               <AudioLines size={42} />
-              <h3>{running ? "Say hello." : "Make it sound like you want."}</h3>
+              <h3>{running ? "Say hello." : "Ready when you are."}</h3>
               <p>
                 {running
                   ? "Speak naturally. Try an interruption or a language switch."
-                  : "Try the opening, ask a difficult question, or change languages. The conversation will appear here."}
+                  : "Start practice to hear the agent and read the conversation here."}
               </p>
             </div>
           )}

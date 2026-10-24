@@ -1,14 +1,40 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { installFixture } from "./fixture";
+
+async function action(page: Page, name: string, menu = "More") {
+  const scope = page.locator(
+    ".configuration-editor:visible, .practice-setup:visible",
+  );
+  await scope.waitFor({ state: "visible" });
+  await scope
+    .getByRole("button", { name, exact: true, includeHidden: true })
+    .waitFor({ state: "attached" });
+  const button = scope.getByRole("button", { name, exact: true });
+  if (!(await button.isVisible()))
+    await scope
+      .locator(".action-menu > summary")
+      .filter({ hasText: menu })
+      .click();
+  await button.click();
+}
+async function globalDefaults(page: Page) {
+  const picker = page.getByRole("combobox", { name: "Editing", exact: true });
+  if (await picker.isVisible()) await picker.selectOption("global");
+  else await page.getByRole("button", { name: "Global Defaults" }).click();
+}
+async function voiceTab(page: Page, scope = "Personality settings") {
+  await page
+    .getByRole("tablist", { name: scope, exact: true })
+    .getByRole("tab", { name: "Voice & Model", exact: true })
+    .click();
+}
 
 test("AI input inspection separates call instructions, runtime tools, and Hermes", async ({
   page,
 }) => {
   await installFixture(page);
   await page.goto("/personalities");
-  await page
-    .getByRole("button", { name: "Inspect AI Inputs", exact: true })
-    .click();
+  await action(page, "Inspect AI Inputs", "Inspect");
   const inspector = page.getByRole("region", { name: "Call AI inputs" });
   await expect(
     inspector.getByText("google/gemini-3.1-flash-lite", { exact: true }),
@@ -34,8 +60,9 @@ test("AI input inspection separates call instructions, runtime tools, and Hermes
   await expect(
     page.getByRole("heading", { name: "Hermes Integration", exact: true }),
   ).toBeVisible();
+  await page.getByRole("tab", { name: "Connection" }).click();
   await expect(
-    page.getByText(/The guide here is read by Hermes/),
+    page.getByText(/The calling guide goes to Hermes/),
   ).toBeVisible();
   await page.getByRole("tab", { name: "MCP Tools" }).click();
   await expect(
@@ -61,9 +88,7 @@ test("practice shows captured model inputs without dialing", async ({
   await expect(
     page.getByText("What would you like to talk about?", { exact: true }),
   ).toBeVisible();
-  await page
-    .getByRole("button", { name: "Inspect AI Inputs", exact: true })
-    .click();
+  await action(page, "Inspect AI Inputs", "Inspect");
   const inspector = page.getByRole("region", { name: "Call AI inputs" });
   await inspector.getByRole("tab", { name: "Latest Request" }).click();
   await expect(inspector.locator("pre")).toContainText(
@@ -84,6 +109,7 @@ test("reading older calls is not reset by automatic refresh", async ({
   await expect(page.getByText("Bookshop", { exact: true })).toBeVisible();
   await page.clock.fastForward(16000);
   await expect(page.getByText("Bookshop", { exact: true })).toBeVisible();
+  await page.locator(".compact-details > summary").click();
   await page
     .getByRole("button", { name: "Refresh calls", exact: true })
     .click();
@@ -110,7 +136,9 @@ test("call history, readable transcript, notes, and full Markdown download", asy
   await page.getByRole("link", { name: "Full Markdown" }).click();
   expect((await download).suggestedFilename()).toBe("transcript.md");
   await page.getByRole("tab", { name: "Notes", exact: true }).click();
-  await page.getByLabel("Notes", { exact: true }).fill("Natural conversation.");
+  await page
+    .getByRole("textbox", { name: "Notes", exact: true })
+    .fill("Natural conversation.");
   await page.getByLabel("Quality tags").fill("Clear voice");
   await page.getByRole("button", { name: "Save Notes" }).click();
   await expect(page.getByRole("status")).toContainText("Saved");
@@ -131,13 +159,14 @@ test("personalities share guided and full-text values and preserve edits during 
   await page
     .getByLabel("Personality prompt")
     .fill("Be thoughtful. Ask about the next chess game.");
-  await page.getByRole("button", { name: "Full Text Editor" }).click();
+  await action(page, "Full Text Editor");
   const editor = page.getByLabel("Configuration", { exact: true });
   const json = JSON.parse(await editor.inputValue());
   expect(json.prompt).toContain("chess");
   json.description = "A chess partner";
   await editor.fill(JSON.stringify(json, null, 2));
-  await page.getByRole("button", { name: "Guided Editor" }).click();
+  await action(page, "Guided Editor");
+  await page.getByText("Personality Details", { exact: true }).click();
   await expect(page.getByLabel("Description", { exact: true })).toHaveValue(
     "A chess partner",
   );
@@ -151,7 +180,7 @@ test("personalities share guided and full-text values and preserve edits during 
   await expect(page.getByRole("status")).toContainText("Saved.");
   expect(state.records["profile:warm"].revision).toBe(2);
   expect(state.started).toBe(0);
-  await page.getByRole("button", { name: "History", exact: true }).click();
+  await action(page, "History");
   await page
     .locator(".history-panel summary")
     .filter({ hasText: "Version 1" })
@@ -405,7 +434,8 @@ test("provider dropdowns respect model capabilities and keep reasoning off on mo
 }) => {
   const state = await installFixture(page);
   await page.goto("/personalities");
-  await page.getByRole("button", { name: "Global Defaults" }).click();
+  await globalDefaults(page);
+  await voiceTab(page);
   const model = page.getByRole("combobox", {
     name: "OpenRouter model",
     exact: true,
@@ -414,6 +444,7 @@ test("provider dropdowns respect model capabilities and keep reasoning off on mo
     model.getByRole("option", { name: "OpenAI: GPT-6 Luna", exact: true }),
   ).toHaveCount(1);
   await model.selectOption("openai/gpt-6-luna");
+  await page.getByText("Response Controls", { exact: true }).click();
   await expect(
     page.getByRole("combobox", { name: "Reasoning", exact: true }),
   ).toHaveValue("none");
@@ -478,15 +509,18 @@ test("named voice and speech choices can be tried directly in Playground without
   await page
     .getByRole("combobox", { name: "Voice model", exact: true })
     .selectOption("inworld-tts-2-flash");
+  await page.getByText("Voice Delivery", { exact: true }).click();
   await expect(
     page.getByRole("combobox", { name: "Delivery", exact: true }),
   ).toBeDisabled();
   await page
+    .getByRole("tablist", { name: "Practice settings" })
+    .getByRole("tab", { name: "Call Settings", exact: true })
+    .click();
+  await page
     .getByRole("combobox", { name: "Soniox model", exact: true })
     .selectOption("stt-rt-v4");
-  await page
-    .getByRole("button", { name: "Inspect AI Inputs", exact: true })
-    .click();
+  await action(page, "Inspect AI Inputs", "Inspect");
   await expect
     .poll(() => state.previewRequest?.overrides?.voice?.inworld_voice)
     .toBe("voice-custom-ashley");
@@ -509,31 +543,140 @@ test("named voice and speech choices can be tried directly in Playground without
   expect(state.records.global.revision).toBe(1);
   expect(state.started).toBe(0);
   await expect(
-    page.getByRole("combobox", { name: "OpenRouter model", exact: true }),
+    page.getByRole("combobox", { name: "Soniox model", exact: true }),
   ).toBeDisabled();
   await page.getByRole("button", { name: "End Practice", exact: true }).click();
   await page
     .getByRole("button", { name: "Reset Practice Choices", exact: true })
     .click();
+  await voiceTab(page, "Practice settings");
   await expect(
     page.getByRole("combobox", { name: "OpenRouter model", exact: true }),
   ).toHaveValue("google/gemini-3.1-flash-lite");
   await page
     .getByRole("combobox", { name: "OpenRouter model", exact: true })
     .selectOption("openai/gpt-6-luna");
-  await page
-    .getByRole("button", { name: "Inspect AI Inputs", exact: true })
-    .click();
+  await action(page, "Inspect AI Inputs", "Inspect");
   await expect
     .poll(() => state.previewRequest?.overrides?.voice?.dialogue_model)
     .toBe("openai/gpt-6-luna");
   await page
     .getByRole("button", { name: "Close Preview", exact: true })
     .click();
+  await action(page, "Inspect Last Session", "Inspect");
+  await expect(
+    page.getByRole("region", { name: "Call AI inputs" }),
+  ).toBeVisible();
+});
+
+test("focused settings preserve edits across sections and keyboard navigation", async ({
+  page,
+}) => {
+  const state = await installFixture(page);
+  await page.goto("/personalities");
   await page
-    .getByRole("button", { name: "Inspect Last Session", exact: true })
+    .getByRole("textbox", { name: "Personality prompt", exact: true })
+    .fill("Keep replies brief and warm.");
+  const tabs = page.getByRole("tablist", { name: "Personality settings" });
+  await expect(
+    page.getByRole("combobox", { name: "OpenRouter model", exact: true }),
+  ).toHaveCount(0);
+  await tabs.getByRole("tab", { name: "Instructions", exact: true }).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(
+    tabs.getByRole("tab", { name: "Voice & Model", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
+  await page
+    .getByRole("combobox", { name: "OpenRouter model", exact: true })
+    .selectOption("openai/gpt-6-luna");
+  await tabs.getByRole("tab", { name: "Call Settings", exact: true }).click();
+  await page
+    .getByRole("spinbutton", { name: "Default minutes", exact: true })
+    .fill("45");
+  await tabs.getByRole("tab", { name: "Instructions", exact: true }).click();
+  await expect(
+    page.getByRole("textbox", { name: "Personality prompt", exact: true }),
+  ).toHaveValue("Keep replies brief and warm.");
+  await page.locator(".configuration-editor .action-menu > summary").click();
+  await expect(
+    page.getByRole("button", { name: "Duplicate", exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(
+    page.getByRole("button", { name: "Duplicate", exact: true }),
+  ).not.toBeVisible();
+  await expect(
+    page.locator(".configuration-editor .action-menu > summary"),
+  ).toBeFocused();
+  let warned = false;
+  page.once("dialog", async (dialog) => {
+    warned = true;
+    await dialog.dismiss();
+  });
+  await globalDefaults(page);
+  expect(warned).toBe(true);
+  await expect(
+    page.getByRole("textbox", { name: "Personality prompt", exact: true }),
+  ).toHaveValue("Keep replies brief and warm.");
+  await page.getByRole("button", { name: "Save Changes", exact: true }).click();
+  await expect.poll(() => state.records["profile:warm"].revision).toBe(2);
+  expect(state.records["profile:warm"].value).toMatchObject({
+    prompt: "Keep replies brief and warm.",
+    voice_overrides: {
+      dialogue_model: "openai/gpt-6-luna",
+      default_call_seconds: 2700,
+    },
+  });
+});
+
+test("practice keeps its end action reachable with expanded settings", async ({
+  page,
+}) => {
+  const state = await installFixture(page);
+  await page.goto("/playground");
+  await page.getByText("Voice and model choices", { exact: true }).click();
+  await page.getByText("Response Controls", { exact: true }).click();
+  await page.getByRole("button", { name: "Text", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Start Text Practice", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Reload Choices", exact: true })
+    .scrollIntoViewIfNeeded();
+  await expect(
+    page.getByRole("button", { name: "End Practice", exact: true }),
+  ).toBeInViewport();
+  await page.getByRole("button", { name: "End Practice", exact: true }).click();
+  await expect.poll(() => state.practiceStops).toBeGreaterThan(0);
+  expect(state.started).toBe(0);
+});
+
+test("call details keep original settings and diagnostics discoverable", async ({
+  page,
+}) => {
+  await installFixture(page);
+  await page.goto("/calls/call_demo_1");
+  await page.getByRole("tab", { name: "Details", exact: true }).click();
+  await expect(
+    page.getByText("google/gemini-3.1-flash-lite", { exact: true }),
+  ).toBeVisible();
+  await page.getByText("Diagnostics", { exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Server reply delays" }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Inspect AI Inputs", exact: true })
     .click();
   await expect(
     page.getByRole("region", { name: "Call AI inputs" }),
+  ).toBeVisible();
+  await page.goto("/calls/call_demo_2");
+  await page.getByRole("tab", { name: "Details", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Configuration not recorded" }),
+  ).toBeVisible();
+  await page.getByRole("tab", { name: "Brief", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Approved brief" }),
   ).toBeVisible();
 });

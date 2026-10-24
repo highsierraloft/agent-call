@@ -42,6 +42,19 @@ The control panel manages call history, versioned personalities, browser practic
 guide consumed by Hermes. Its React interface is built with `dashboard/package-lock.json` and
 served by `Dockerfile.control`. Administration APIs remain inside the existing FastAPI worker.
 
+The interface uses the same four work areas throughout: Calls, Personalities, Playground, and Hermes.
+Personalities separates Instructions, Voice & Model, and Call Settings. The selected section preserves
+unsaved edits. Save and Try in Playground stay visible; More contains the full-text editor, history,
+and duplication. Response controls, delivery options, and turn timing use labelled disclosures with
+current-value summaries. On narrow screens, a profile picker replaces the library list.
+
+Playground keeps Start/End Practice above optional settings and fixes these controls to the bottom
+on narrow screens. Its Inspect menu keeps current inputs and the last session separate. Calls keeps
+search visible, groups filters, and puts settings and diagnostics in Details. Hermes keeps the calling
+guide separate from MCP tools and connection help. All existing settings, data, and actions remain
+available. The web interface applies Apple's hierarchy, grouping, accessibility, and progressive-
+disclosure principles using semantic HTML, system type, restrained dividers, and system appearance.
+
 Saving creates an immutable revision and applies it to future preparations. Existing plans and
 active calls retain their stored prompt and voice settings. Restoration creates another revision.
 Concurrent saves use the expected revision and return a conflict instead of overwriting another edit.
@@ -139,8 +152,8 @@ Browser tests use synthetic records and intercepted APIs; they cannot place a te
 `Dockerfile.control-tests` provides an isolated Linux WebKit environment when the local runtime
 is unavailable. Run it with no external network after building its dependencies.
 Provider-backed browser acceptance uses synthetic microphone audio, not an unattended real microphone.
-The control-panel gate passed 974 backend tests with two skips and 89.06% coverage.
-Fifty-six browser checks cover Chromium, dark appearance, desktop WebKit, and phone WebKit.
+The control-panel gate passed 974 backend tests with two skips and 89.07% coverage.
+Sixty-eight browser checks cover Chromium, dark appearance, desktop WebKit, and phone WebKit.
 They include the local audio handshake, microphone release, permission denial, and stable pagination.
 The production image also removes Caddy's file capability so it runs with all Linux capabilities dropped.
 A provider-backed browser replay completed four languages and interruptions. Four measured reply starts

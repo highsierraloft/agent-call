@@ -13,6 +13,7 @@ import {
 import { api, message } from "./api";
 import AIInputs from "./AIInputs";
 import { tabKeys } from "./a11y";
+import { SettingsDisclosure } from "./Controls";
 import {
   languages,
   terminal,
@@ -163,51 +164,57 @@ export default function Calls({
               onChange={(e) => setQ(e.target.value)}
             />
           </label>
-          <div className="filter-row">
-            <select
-              aria-label="Filter by status"
-              value={state}
-              onChange={(e) => setState(e.target.value)}
-            >
-              <option value="">All statuses</option>
-              {[
-                "completed",
-                "failed",
-                "timed_out",
-                "active",
-                "terminating",
-              ].map((v) => (
-                <option key={v} value={v}>
-                  {stateLabel(v)}
-                </option>
-              ))}
-            </select>
-            <select
-              aria-label="Filter by language"
-              value={language}
-              onChange={(e) => setLanguage(e.target.value)}
-            >
-              <option value="">All languages</option>
-              {Object.entries(languages).map(([k, v]) => (
-                <option key={k} value={k}>
-                  {v}
-                </option>
-              ))}
-            </select>
-            <button
-              className="icon-button"
-              aria-label="Refresh calls"
-              disabled={loadingMore}
-              onClick={() => {
-                paginated.current = false;
-                setRefresh((v) => v + 1);
-              }}
-            >
-              <RefreshCw size={16} />
-            </button>
-          </div>
           <details className="compact-details">
-            <summary>More filters</summary>
+            <summary>
+              Filters
+              {[state, language, profile, start, end].filter(Boolean).length >
+                0 &&
+                ` · ${[state, language, profile, start, end].filter(Boolean).length} active`}
+            </summary>
+            <div className="filter-row">
+              <select
+                aria-label="Filter by status"
+                value={state}
+                onChange={(e) => setState(e.target.value)}
+              >
+                <option value="">All statuses</option>
+                {[
+                  "completed",
+                  "failed",
+                  "timed_out",
+                  "active",
+                  "terminating",
+                ].map((v) => (
+                  <option key={v} value={v}>
+                    {stateLabel(v)}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="Filter by language"
+                value={language}
+                onChange={(e) => setLanguage(e.target.value)}
+              >
+                <option value="">All languages</option>
+                {Object.entries(languages).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="icon-button"
+                aria-label="Refresh calls"
+                disabled={loadingMore}
+                onClick={() => {
+                  paginated.current = false;
+                  setRefresh((v) => v + 1);
+                }}
+              >
+                <RefreshCw size={16} />
+              </button>
+            </div>
+
             <label>
               Personality
               <select
@@ -330,9 +337,6 @@ export default function Calls({
           <button onClick={() => onNew()}>
             Start a Call <ArrowUpRight size={16} />
           </button>
-          <span className="muted caption">
-            RECORDINGS AND TRANSCRIPTS STAY PRIVATE
-          </span>
         </section>
       )}
     </div>
@@ -483,10 +487,10 @@ function CallDetail({
         </button>
         <div className="row-top">
           <div>
-            <span className="eyebrow">
-              {date(detail.timing.created_at, session.timezone)}
-            </span>
             <h2>{detail.brief.target.name}</h2>
+            <p className="call-date muted">
+              {date(detail.timing.created_at, session.timezone)}
+            </p>
             <span className="muted">{detail.brief.target.phone}</span>
           </div>
           <span className="pill">
@@ -540,18 +544,19 @@ function CallDetail({
           aria-label="Call details"
           onKeyDown={tabKeys}
         >
-          {["transcript", "brief", "settings", "diagnostics", "notes"].map(
-            (t) => (
-              <button
-                key={t}
-                role="tab"
-                aria-selected={tab === t}
-                onClick={() => setTab(t)}
-              >
-                {t[0].toUpperCase() + t.slice(1)}
-              </button>
-            ),
-          )}
+          {["transcript", "brief", "notes", "details"].map((t) => (
+            <button
+              key={t}
+              role="tab"
+              id={`call-tab-${t}`}
+              aria-controls={`call-panel-${t}`}
+              tabIndex={tab === t ? 0 : -1}
+              aria-selected={tab === t}
+              onClick={() => setTab(t)}
+            >
+              {t[0].toUpperCase() + t.slice(1)}
+            </button>
+          ))}
         </div>
       </div>
       {error && (
@@ -643,91 +648,116 @@ function CallDetail({
             ))}
           </div>
         )}
-        {tab === "settings" &&
-          (detail.configuration ? (
-            <div className="reading">
-              <h3>{detail.configuration.profile_name}</h3>
-              <p className="muted">
-                Personality v{detail.configuration.profile_revision} · Global
-                settings v{detail.configuration.configuration_revision}
-              </p>
-              <dl className="facts">
-                <dt>Model</dt>
-                <dd>{detail.configuration.voice.dialogue_model}</dd>
-                <dt>Voice</dt>
-                <dd>{detail.configuration.voice.inworld_voice}</dd>
-                <dt>Voice model</dt>
-                <dd>{detail.configuration.voice.inworld_model}</dd>
-              </dl>
-              <button
-                onClick={() => showInputs().catch((e) => setError(message(e)))}
-              >
-                Inspect AI Inputs
-              </button>
-              <details>
-                <summary>Recorded starting system prompt</summary>
-                <pre className="prompt-preview">{detail.prompt}</pre>
-              </details>
-              <details>
-                <summary>All settings used</summary>
-                <pre>{JSON.stringify(detail.configuration.voice, null, 2)}</pre>
-              </details>
-            </div>
-          ) : (
-            <div className="empty small">
-              <h3>Configuration not recorded</h3>
-              <p>
-                This older call has no saved configuration snapshot. Its
-                original brief is still available.
-              </p>
-            </div>
-          ))}
-        {tab === "settings" && inputs && (
-          <AIInputs
-            data={inputs}
-            onClose={() => setInputs(null)}
-            onRefresh={showInputs}
-          />
-        )}
-        {tab === "diagnostics" && (
-          <div className="reading">
-            <h3>Call diagnostics</h3>
-            <dl className="facts">
-              <dt>Ended because</dt>
-              <dd>
-                {detail.timing.termination_reason?.replaceAll("_", " ") ||
-                  "Still in progress"}
-              </dd>
-              <dt>Answered</dt>
-              <dd>{date(detail.timing.answered_at, session.timezone)}</dd>
-              <dt>Ended</dt>
-              <dd>{date(detail.timing.ended_at, session.timezone)}</dd>
-            </dl>
-            <h4>Server reply delays</h4>
-            <p className="muted">
-              These measurements exclude carrier and handset delay.
-            </p>
-            {detail.latency.length ? (
-              detail.latency.map((m, i) => (
-                <details key={i} className="metric">
-                  <summary>
-                    Reply {i + 1}
-                    <strong>{m.seconds.toFixed(2)} s</strong>
-                  </summary>
-                  {m.parts?.map((p, j) => (
-                    <div className="row-top" key={j}>
-                      <span>{p.stage.replaceAll("_", " ")}</span>
-                      <span>{p.seconds.toFixed(2)} s</span>
-                    </div>
-                  ))}
+        {tab === "details" && (
+          <SettingsDisclosure
+            title="Settings Used"
+            summary={
+              detail.configuration
+                ? detail.configuration.profile_name +
+                  " · " +
+                  detail.configuration.voice.inworld_voice
+                : "Not recorded"
+            }
+            initialOpen
+          >
+            {detail.configuration ? (
+              <div className="reading">
+                <h3>{detail.configuration.profile_name}</h3>
+                <p className="muted">
+                  Personality v{detail.configuration.profile_revision} · Global
+                  settings v{detail.configuration.configuration_revision}
+                </p>
+                <dl className="facts">
+                  <dt>Model</dt>
+                  <dd>{detail.configuration.voice.dialogue_model}</dd>
+                  <dt>Voice</dt>
+                  <dd>{detail.configuration.voice.inworld_voice}</dd>
+                  <dt>Voice model</dt>
+                  <dd>{detail.configuration.voice.inworld_model}</dd>
+                </dl>
+                <button
+                  onClick={() =>
+                    showInputs().catch((e) => setError(message(e)))
+                  }
+                >
+                  Inspect AI Inputs
+                </button>
+                <details>
+                  <summary>Recorded starting system prompt</summary>
+                  <pre className="prompt-preview">{detail.prompt}</pre>
                 </details>
-              ))
+                <details>
+                  <summary>All settings used</summary>
+                  <pre>
+                    {JSON.stringify(detail.configuration.voice, null, 2)}
+                  </pre>
+                </details>
+              </div>
             ) : (
-              <p className="muted">
-                No timing measurements were recorded for this call.
-              </p>
+              <div className="empty small">
+                <h3>Configuration not recorded</h3>
+                <p>
+                  This older call has no saved configuration snapshot. Its
+                  original brief is still available.
+                </p>
+              </div>
             )}
-          </div>
+            {inputs && (
+              <AIInputs
+                data={inputs}
+                onClose={() => setInputs(null)}
+                onRefresh={showInputs}
+              />
+            )}
+          </SettingsDisclosure>
+        )}
+        {tab === "details" && (
+          <SettingsDisclosure
+            title="Diagnostics"
+            summary={
+              detail.timing.termination_reason?.replaceAll("_", " ") ||
+              "Call in progress"
+            }
+          >
+            <div className="reading">
+              <h3>Call diagnostics</h3>
+              <dl className="facts">
+                <dt>Ended because</dt>
+                <dd>
+                  {detail.timing.termination_reason?.replaceAll("_", " ") ||
+                    "Still in progress"}
+                </dd>
+                <dt>Answered</dt>
+                <dd>{date(detail.timing.answered_at, session.timezone)}</dd>
+                <dt>Ended</dt>
+                <dd>{date(detail.timing.ended_at, session.timezone)}</dd>
+              </dl>
+              <h4>Server reply delays</h4>
+              <p className="muted">
+                These measurements exclude carrier and handset delay.
+              </p>
+              {detail.latency.length ? (
+                detail.latency.map((m, i) => (
+                  <details key={i} className="metric">
+                    <summary>
+                      Reply {i + 1}
+                      <strong>{m.seconds.toFixed(2)} s</strong>
+                    </summary>
+                    {m.parts?.map((p, j) => (
+                      <div className="row-top" key={j}>
+                        <span>{p.stage.replaceAll("_", " ")}</span>
+                        <span>{p.seconds.toFixed(2)} s</span>
+                      </div>
+                    ))}
+                  </details>
+                ))
+              ) : (
+                <p className="muted">
+                  No timing measurements were recorded for this call.
+                </p>
+              )}
+            </div>
+          </SettingsDisclosure>
         )}
         {tab === "notes" && (
           <div className="reading">

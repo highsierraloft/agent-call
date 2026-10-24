@@ -5,7 +5,6 @@ import {
   SlidersHorizontal,
   Plug,
   Plus,
-  ArrowUpRight,
   Radio,
   CheckCircle2,
   Square,
@@ -135,9 +134,7 @@ export default function App() {
           }}
         >
           <AudioLines size={27} />
-          <span>
-            Calling Agent<small>Private workspace</small>
-          </span>
+          <span>Calling Agent</span>
         </a>
         <nav aria-label="Main navigation">
           {sections.map((s) => (
@@ -156,11 +153,8 @@ export default function App() {
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <span className="caption">CALLING THROUGH</span>
           <strong>Spanish DIGI</strong>
-          <a href={session.hermes_url} target="_blank" rel="noreferrer">
-            Open Hermes <ArrowUpRight size={14} />
-          </a>
+          <small>Phone line</small>
         </div>
       </aside>
       <main className="workspace">
@@ -208,7 +202,7 @@ export default function App() {
               </button>
             )}
             <button
-              className="primary"
+              className={section.id === "calls" ? "primary" : ""}
               onClick={() => openCall()}
               disabled={!!status?.active_call || !!status?.practice_active}
             >

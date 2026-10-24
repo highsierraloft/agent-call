@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Phone, X, ChevronLeft } from "lucide-react";
 import { api, message, ApiError } from "./api";
+import { SettingsDisclosure } from "./Controls";
 import {
   languages,
   sampleBrief,
@@ -114,10 +115,10 @@ export default function NewCall({
     >
       <header>
         <div>
-          <span className="eyebrow">SPANISH DIGI</span>
           <h2 id="call-dialog-title">
             {prepared ? "Review Call" : "New Call"}
           </h2>
+          <p className="muted">Calling through Spanish DIGI</p>
         </div>
         <button
           aria-label="Close call form"
@@ -197,64 +198,71 @@ export default function NewCall({
               onChange={(e) => update("objective", e.target.value)}
             />
           </label>
-          <div className="two-fields">
-            <label>
-              Personality
-              <select
-                value={brief.profile_id || brief.personality || "warm"}
-                onChange={(e) => update("profile_id", e.target.value)}
-              >
-                {session.setup.profiles.map((p) => (
-                  <option value={p.id} key={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Purpose
-              <select
-                value={brief.intention}
-                onChange={(e) =>
-                  update("intention", e.target.value as Intention)
-                }
-              >
-                {["task", "conversation", "sales", "roleplay", "prank"].map(
-                  (v) => (
-                    <option key={v}>{v}</option>
-                  ),
-                )}
-              </select>
-            </label>
-          </div>
-          <div className="two-fields">
-            <label>
-              Initial language
-              <select
-                value={brief.language}
-                onChange={(e) => update("language", e.target.value as Language)}
-              >
-                {Object.entries(languages).map(([k, v]) => (
-                  <option key={k} value={k}>
-                    {v}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Maximum minutes
-              <input
-                type="number"
-                min="0.5"
-                max="120"
-                step="0.5"
-                value={brief.max_duration_seconds / 60}
-                onChange={(e) =>
-                  update("max_duration_seconds", Number(e.target.value) * 60)
-                }
-              />
-            </label>
-          </div>
+          <SettingsDisclosure
+            title="Call Settings"
+            summary={`${session.setup.profiles.find((p) => p.id === brief.profile_id)?.name || "Warm"} · ${languages[brief.language]} · ${brief.max_duration_seconds / 60} min`}
+          >
+            <div className="two-fields">
+              <label>
+                Personality
+                <select
+                  value={brief.profile_id || brief.personality || "warm"}
+                  onChange={(e) => update("profile_id", e.target.value)}
+                >
+                  {session.setup.profiles.map((p) => (
+                    <option value={p.id} key={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Purpose
+                <select
+                  value={brief.intention}
+                  onChange={(e) =>
+                    update("intention", e.target.value as Intention)
+                  }
+                >
+                  {["task", "conversation", "sales", "roleplay", "prank"].map(
+                    (v) => (
+                      <option key={v}>{v}</option>
+                    ),
+                  )}
+                </select>
+              </label>
+            </div>
+            <div className="two-fields">
+              <label>
+                Initial language
+                <select
+                  value={brief.language}
+                  onChange={(e) =>
+                    update("language", e.target.value as Language)
+                  }
+                >
+                  {Object.entries(languages).map(([k, v]) => (
+                    <option key={k} value={k}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Maximum minutes
+                <input
+                  type="number"
+                  min="0.5"
+                  max="120"
+                  step="0.5"
+                  value={brief.max_duration_seconds / 60}
+                  onChange={(e) =>
+                    update("max_duration_seconds", Number(e.target.value) * 60)
+                  }
+                />
+              </label>
+            </div>
+          </SettingsDisclosure>
           <details>
             <summary>Facts and limits</summary>
             {(

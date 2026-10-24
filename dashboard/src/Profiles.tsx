@@ -23,6 +23,7 @@ import {
 } from "./types";
 import VoiceFields from "./VoiceFields";
 import AIInputs from "./AIInputs";
+import { ActionMenu, SectionTabs, SettingsDisclosure } from "./Controls";
 
 type Editable = Global | Profile | Guide;
 export default function Profiles({
@@ -83,11 +84,16 @@ export default function Profiles({
     });
     setEntity("profile:" + id);
   }
+  function selectEntity(next: string) {
+    if (dirty && !window.confirm("Discard unsaved changes?")) return;
+    setFresh(undefined);
+    setEntity(next);
+  }
   return (
     <div className="editor-layout">
       <aside className="profile-list">
         <div className="section-heading">
-          <span className="caption">LIBRARY</span>
+          <span className="list-label">Your Personalities</span>
           <button
             className="icon-button"
             aria-label="New personality"
@@ -96,16 +102,30 @@ export default function Profiles({
             <Plus size={18} />
           </button>
         </div>
+        <label className="profile-picker">
+          Editing
+          <select value={entity} onChange={(e) => selectEntity(e.target.value)}>
+            <option value="global">Global Defaults</option>
+            {fresh && !profiles.some((p) => p.entity === fresh.entity) && (
+              <option value={fresh.entity}>{fresh.value.name}</option>
+            )}
+            <optgroup label="Personalities">
+              {profiles.map((p) => (
+                <option key={p.entity} value={p.entity}>
+                  {p.value.name}
+                  {p.value.archived ? " (archived)" : ""}
+                </option>
+              ))}
+            </optgroup>
+          </select>
+        </label>
         <button
           className={"profile-row " + (entity === "global" ? "selected" : "")}
-          onClick={() => {
-            setFresh(undefined);
-            setEntity("global");
-          }}
+          onClick={() => selectEntity("global")}
         >
           <Settings2 size={18} />
           <span>
-            Global Defaults<small>Shared voice and conversation settings</small>
+            Global Defaults<small>Shared defaults for every personality</small>
           </span>
         </button>
         <div className="list-divider" />
@@ -113,20 +133,16 @@ export default function Profiles({
           <button
             className={"profile-row " + (p.entity === entity ? "selected" : "")}
             key={p.entity}
-            onClick={() => {
-              if (dirty && !window.confirm("Discard unsaved changes?")) return;
-              setFresh(undefined);
-              setEntity(p.entity);
-            }}
+            onClick={() => selectEntity(p.entity)}
           >
-            <span className="profile-monogram">{p.value.name.slice(0, 1)}</span>
             <span>
               {p.value.name}
-              <small>
-                {p.value.archived
-                  ? "Archived"
-                  : p.value.description || "Custom personality"}
-              </small>
+              {p.value.archived ? (
+                <small>Archived</small>
+              ) : p.value.description &&
+                p.value.description !== "Built-in starting personality" ? (
+                <small>{p.value.description}</small>
+              ) : null}
             </span>
           </button>
         ))}
@@ -180,7 +196,8 @@ export function ConfigurationEditor({
     [busy, setBusy] = useState(false),
     [history, setHistory] = useState<Revision<Editable>[]>([]),
     [showHistory, setShowHistory] = useState(false),
-    [preview, setPreview] = useState<AIInputInspection | null>(null);
+    [preview, setPreview] = useState<AIInputInspection | null>(null),
+    [section, setSection] = useState("instructions");
   useEffect(() => {
     if (initial) return;
     let alive = true;
@@ -344,67 +361,84 @@ export function ConfigurationEditor({
       entity === "global"
         ? "Global Defaults"
         : entity === "guide"
-          ? "Hermes Calling Guide"
+          ? "Calling Guide"
           : (value as Profile).name;
   return (
     <section className="configuration-editor" ref={editor}>
-      <header className="editor-heading">
-        <div>
-          <span className="eyebrow">
-            {entity === "guide" ? "FOR HERMES · " : "FOR THE CALL AI · "}
-            {record.revision ? "VERSION " + record.revision : "NEW PERSONALITY"}
-            {dirty ? " · UNSAVED CHANGES" : ""}
-          </span>
-          <h2>{title}</h2>
-          <p className="muted">
-            {entity === "guide"
-              ? "Hermes reads this guide before preparing its next call. It is not the voice agent’s conversation prompt."
-              : "Saving changes future calls. Prepared and active calls keep their settings."}
-          </p>
-        </div>
-        <button
-          className="primary"
-          disabled={busy || (!dirty && record.revision > 0)}
-          onClick={() => save()}
-        >
-          {busy ? "Saving…" : "Save Changes"}
-        </button>
-      </header>
-      <div className="editor-tools">
-        <button onClick={toggleRaw}>
-          <Code2 size={16} />
-          {rawMode ? "Guided Editor" : "Full Text Editor"}
-        </button>
-        {entity !== "guide" && (
-          <>
-            <button onClick={showPrompt}>
-              <FileText size={16} />
-              Inspect AI Inputs
-            </button>
+      <div className="editor-topbar">
+        <header className="editor-heading">
+          <div>
+            <div className="editor-title">
+              <h2>{title}</h2>
+              <span className="version-label">
+                {record.revision ? "Version " + record.revision : "New"}
+              </span>
+            </div>
+            <p className="muted">
+              {entity === "guide"
+                ? "Hermes uses this guide for its next call."
+                : entity === "global"
+                  ? "Shared defaults for future calls."
+                  : "Changes apply to future calls."}
+            </p>
+          </div>
+          <div className="editor-save">
+            {dirty && <span className="change-label">Unsaved changes</span>}
             <button
-              onClick={() => {
-                try {
-                  onTest?.(draft());
-                } catch (e) {
-                  setError(message(e));
-                }
-              }}
+              className={dirty || record.revision === 0 ? "primary" : ""}
+              disabled={busy || (!dirty && record.revision > 0)}
+              onClick={() => save()}
             >
-              <AudioLines size={16} />
-              Try in Playground
+              {busy ? "Saving…" : "Save Changes"}
             </button>
-          </>
-        )}
-        {isProfile && (
-          <button onClick={() => onDuplicate?.(candidate() as Profile)}>
-            <Copy size={16} />
-            Duplicate
-          </button>
-        )}
-        <button disabled={!record.revision} onClick={loadHistory}>
-          <History size={16} />
-          History
-        </button>
+            <ActionMenu>
+              <button onClick={toggleRaw} disabled={busy}>
+                <Code2 size={16} />
+                {rawMode ? "Guided Editor" : "Full Text Editor"}
+              </button>
+              <button disabled={busy || !record.revision} onClick={loadHistory}>
+                <History size={16} />
+                History
+              </button>
+              {isProfile && (
+                <button
+                  disabled={busy}
+                  onClick={() => onDuplicate?.(candidate() as Profile)}
+                >
+                  <Copy size={16} />
+                  Duplicate
+                </button>
+              )}
+            </ActionMenu>
+          </div>
+        </header>
+        <div className="editor-tools">
+          {entity !== "guide" && (
+            <>
+              <button
+                onClick={() => {
+                  try {
+                    onTest?.(draft());
+                  } catch (e) {
+                    setError(message(e));
+                  }
+                }}
+                disabled={busy}
+              >
+                <AudioLines size={16} />
+                Try in Playground
+              </button>
+              <button
+                className="quiet-button"
+                onClick={showPrompt}
+                disabled={busy}
+              >
+                <FileText size={16} />
+                Inspect AI Inputs
+              </button>
+            </>
+          )}
+        </div>
       </div>
       {error && (
         <p className="error" role="alert">
@@ -508,29 +542,75 @@ export function ConfigurationEditor({
               not part of this configuration.
             </small>
           </label>
-        ) : entity === "global" ? (
-          <GlobalFields value={value as Global} onChange={edit} />
         ) : entity === "guide" ? (
           <label>
             Instructions
             <textarea
               aria-label="Instructions"
-              rows={22}
+              rows={20}
               value={(value as Guide).text}
               onChange={(e) => edit({ text: e.target.value })}
             />
           </label>
         ) : (
-          <ProfileFields
-            value={value as Profile}
-            base={session.setup.defaults}
-            onChange={edit}
-            canArchive={
-              !["warm", "professional", "salesperson", "playful"].includes(
-                entity.slice(8),
+          <SectionTabs
+            label="Personality settings"
+            value={section}
+            onChange={setSection}
+            items={[
+              { id: "instructions", label: "Instructions" },
+              { id: "voice", label: "Voice & Model" },
+              { id: "call", label: "Call Settings" },
+            ]}
+          >
+            {section === "instructions" ? (
+              entity === "global" ? (
+                <GlobalFields value={value as Global} onChange={edit} />
+              ) : (
+                <ProfileFields
+                  value={value as Profile}
+                  onChange={edit}
+                  canArchive={
+                    ![
+                      "warm",
+                      "professional",
+                      "salesperson",
+                      "playful",
+                    ].includes(entity.slice(8))
+                  }
+                />
               )
-            }
-          />
+            ) : (
+              <>
+                <p className="section-intro muted">
+                  {entity === "global"
+                    ? section === "voice"
+                      ? "Choose how the agent thinks and sounds."
+                      : "Set languages, speech recognition, and call limits."
+                    : "Uses global defaults unless you override a setting here."}
+                </p>
+                <VoiceFields
+                  section={section as "voice" | "call"}
+                  value={
+                    entity === "global"
+                      ? (value as Global).voice
+                      : (value as Profile).voice_overrides
+                  }
+                  base={
+                    entity === "global"
+                      ? (value as Global).voice
+                      : session.setup.defaults
+                  }
+                  overrides={entity !== "global"}
+                  onChange={(v) =>
+                    entity === "global"
+                      ? edit({ ...(value as Global), voice: v as Voice })
+                      : edit({ ...(value as Profile), voice_overrides: v })
+                  }
+                />
+              </>
+            )}
+          </SectionTabs>
         )}
       </fieldset>
     </section>
@@ -547,17 +627,14 @@ function GlobalFields({
   return (
     <>
       <section className="form-section">
-        <h3>Conversation</h3>
-        <p className="muted">
-          These shared instructions go to the AI speaking on the call. The
-          selected personality and the individual call brief add their
-          instructions. Voice and model overrides in a personality take
-          precedence over these defaults.
+        <p className="section-intro muted">
+          The call AI combines these instructions with the chosen personality
+          and call brief.
         </p>
         <label>
           How the agent talks
           <textarea
-            rows={10}
+            rows={8}
             value={value.prompts.conversation}
             onChange={(e) =>
               onChange({
@@ -570,7 +647,7 @@ function GlobalFields({
         <label>
           Opening instructions
           <textarea
-            rows={5}
+            rows={4}
             value={value.prompts.opening}
             onChange={(e) =>
               onChange({
@@ -605,87 +682,71 @@ function GlobalFields({
           ))}
         </details>
       </section>
-      <section className="form-section">
-        <h3>Voice and model defaults</h3>
-        <VoiceFields
-          value={value.voice}
-          base={value.voice}
-          onChange={(v) => onChange({ ...value, voice: v as Voice })}
-        />
-      </section>
     </>
   );
 }
 function ProfileFields({
   value,
-  base,
   onChange,
   canArchive,
 }: {
   value: Profile;
-  base: Voice;
   onChange: (v: Profile) => void;
   canArchive: boolean;
 }) {
   return (
     <>
       <section className="form-section">
-        <div className="two-fields">
-          <label>
-            Name
-            <input
-              value={value.name}
-              onChange={(e) => onChange({ ...value, name: e.target.value })}
-            />
-          </label>
-          <label>
-            Base style
-            <select
-              value={value.personality}
-              onChange={(e) =>
-                onChange({
-                  ...value,
-                  personality: e.target.value as Profile["personality"],
-                })
-              }
-            >
-              {["professional", "warm", "salesperson", "playful"].map((v) => (
-                <option key={v}>{v}</option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <label>
-          Description
-          <input
-            aria-label="Description"
-            value={value.description}
-            onChange={(e) =>
-              onChange({ ...value, description: e.target.value })
-            }
-          />
-          <small>Helps you and Hermes choose this personality.</small>
-        </label>
         <label>
           Personality prompt
           <textarea
-            rows={10}
+            rows={8}
             value={value.prompt}
             onChange={(e) => onChange({ ...value, prompt: e.target.value })}
           />
         </label>
-      </section>
-      <section className="form-section">
-        <h3>Voice and conversation settings</h3>
-        <p className="muted">
-          Settings inherit global defaults until you change them here.
-        </p>
-        <VoiceFields
-          value={value.voice_overrides}
-          base={base}
-          overrides
-          onChange={(v) => onChange({ ...value, voice_overrides: v })}
-        />
+        <SettingsDisclosure
+          title="Personality Details"
+          summary={value.name + " · " + value.personality}
+          initialOpen={value.name === "New Personality"}
+        >
+          <div className="two-fields">
+            <label>
+              Name
+              <input
+                value={value.name}
+                onChange={(e) => onChange({ ...value, name: e.target.value })}
+              />
+            </label>
+            <label>
+              Base style
+              <select
+                value={value.personality}
+                onChange={(e) =>
+                  onChange({
+                    ...value,
+                    personality: e.target.value as Profile["personality"],
+                  })
+                }
+              >
+                {["professional", "warm", "salesperson", "playful"].map((v) => (
+                  <option key={v}>{v}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <label>
+            Description
+            <input
+              aria-label="Description"
+              value={value.description}
+              onChange={(e) =>
+                onChange({ ...value, description: e.target.value })
+              }
+            />
+            <small>Helps you and Hermes choose this personality.</small>
+          </label>
+        </SettingsDisclosure>
       </section>
       {canArchive && (
         <section className="form-section">

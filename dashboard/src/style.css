@@ -38,11 +38,6 @@
     display: block;
     margin: 4px 0 0 16px;
   }
-  .integration-boundary {
-    max-width: 72ch;
-    padding: 16px 0;
-    border-bottom: 1px solid var(--line);
-  }
 }
 @layer base {
   :root {
@@ -97,7 +92,7 @@
     align-items: center;
     justify-content: center;
     gap: 7px;
-    min-height: 36px;
+    min-height: 40px;
     padding: 7px 12px;
     border: 1px solid var(--line);
     border-radius: 8px;
@@ -239,16 +234,9 @@
   .muted {
     color: var(--muted);
   }
-  .caption,
-  .eyebrow {
-    font-size: 0.7857rem;
-    font-weight: 550;
-    letter-spacing: 0.06em;
-  }
-  .eyebrow {
-    display: block;
+  .caption {
+    font-size: 0.8571rem;
     color: var(--muted);
-    margin-bottom: 7px;
   }
   .error {
     padding: 12px 14px;
@@ -259,7 +247,6 @@
   }
   .success-notice {
     padding: 10px 14px;
-    border-left: 3px solid var(--accent);
     background: var(--selected);
   }
   .preserve {
@@ -369,12 +356,6 @@
   .brand svg {
     color: var(--accent);
   }
-  .brand small {
-    display: block;
-    letter-spacing: 0;
-    margin-top: 2px;
-    font-size: 0.7857rem;
-  }
   .sidebar nav {
     display: flex;
     flex-direction: column;
@@ -409,10 +390,6 @@
     font-weight: 550;
     color: var(--text);
   }
-  .sidebar-bottom a {
-    margin-top: 16px;
-    font-size: 0.8571rem;
-  }
   .workspace {
     min-width: 0;
     display: flex;
@@ -421,9 +398,9 @@
     overflow: hidden;
   }
   .app-toolbar {
-    height: 82px;
+    height: 72px;
     flex-shrink: 0;
-    padding: 0 30px;
+    padding: 0 28px;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -435,7 +412,7 @@
   }
   .toolbar-actions {
     display: flex;
-    gap: 22px;
+    gap: 16px;
     align-items: center;
   }
   .readiness {
@@ -465,7 +442,7 @@
   }
   .editor-layout {
     display: grid;
-    grid-template-columns: 250px minmax(0, 1fr);
+    grid-template-columns: 220px minmax(0, 1fr);
     min-height: 0;
     flex: 1;
     overflow: hidden;
@@ -477,17 +454,17 @@
   }
   .configuration-editor {
     min-width: 0;
-    padding: 32px 36px 60px;
+    padding: 0 28px 40px;
     overflow: auto;
   }
   .playground-layout {
     display: grid;
-    grid-template-columns: 320px minmax(0, 1fr);
+    grid-template-columns: 360px minmax(0, 1fr);
     min-height: 0;
     flex: 1;
   }
   .practice-setup {
-    padding: 30px 24px;
+    padding: 24px;
     overflow: auto;
     border-right: 1px solid var(--line);
   }
@@ -506,11 +483,11 @@
   .integration-page .configuration-editor {
     padding: 28px 0;
     overflow: visible;
-    max-width: 1100px;
+    max-width: 920px;
   }
   .integration-content {
     padding: 28px 0;
-    max-width: 1000px;
+    max-width: 920px;
   }
   .section-container {
     display: flex;
@@ -552,18 +529,6 @@
     font-size: 0.8571rem;
     background: var(--bg);
   }
-  .filter-row {
-    display: flex;
-    gap: 6px;
-    align-items: center;
-  }
-  .filter-row select {
-    padding: 7px 3px;
-    background: transparent;
-    border-color: transparent;
-    font-size: 0.8571rem;
-    flex: 1;
-  }
   .compact-details {
     margin-top: 8px;
     border: 0;
@@ -593,7 +558,6 @@
   }
   .call-row.selected {
     background: var(--selected);
-    box-shadow: inset 3px 0 var(--accent);
   }
   .call-row strong {
     font-size: 1rem;
@@ -713,6 +677,15 @@
     display: flex;
     gap: 12px;
     flex-direction: column;
+  }
+  .recording.muted {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .recording.muted svg {
+    flex-shrink: 0;
+    margin-top: 3px;
   }
   .recording audio {
     display: block;
@@ -849,18 +822,6 @@
     margin-top: 4px;
     font-size: 0.7857rem;
   }
-  .profile-monogram {
-    width: 28px;
-    height: 32px;
-    flex-shrink: 0;
-    display: grid;
-    place-items: center;
-    border-radius: 7px;
-    background: var(--surface);
-    border: 1px solid var(--line);
-    font-weight: 650;
-    color: var(--muted);
-  }
   .list-divider {
     border-bottom: 1px solid var(--line);
     margin: 14px 10px;
@@ -874,23 +835,16 @@
   .editor-heading p {
     font-size: 0.8571rem;
     max-width: 540px;
-    margin-top: 12px;
-  }
-  .editor-tools {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 7px;
-    margin: 24px 0;
+    margin-top: 6px;
   }
   .editor-tools button {
-    font-size: 0.8571rem;
-    background: transparent;
-    padding: 6px 10px;
+    font-size: 1rem;
+    padding: 7px 10px;
   }
   .form-section {
-    padding: 24px 0;
-    border-top: 1px solid var(--line);
-    max-width: 1000px;
+    padding: 0;
+    border: 0;
+    max-width: 920px;
   }
   .form-section h3 {
     margin-bottom: 22px;
@@ -955,10 +909,7 @@
     width: 100%;
   }
   .voice-fields h4 {
-    margin: 28px 0 14px;
-  }
-  .catalog-heading {
-    flex-wrap: wrap;
+    margin: 24px 0 12px;
   }
   .practice-model-settings {
     margin: 18px 0;
@@ -971,21 +922,18 @@
   .practice-model-settings .language-options {
     display: block;
   }
-  .practice-model-settings .catalog-heading {
-    align-items: flex-start;
-  }
-  .practice-model-settings p {
+  .practice-model-settings .practice-model-settings p {
     margin: 14px 0;
   }
   .practice-setup h2 {
     font-size: 1.6429rem;
   }
   .practice-setup > p {
-    margin: 14px 0 24px;
+    margin: 8px 0 16px;
     font-size: 0.9286rem;
   }
   .practice-setup label {
-    font-size: 0.8571rem;
+    font-size: 1rem;
   }
   .practice-setup .caption {
     font-size: 0.7857rem;
@@ -1007,12 +955,6 @@
   .segmented button[aria-pressed="true"] {
     background: var(--surface);
     box-shadow: 0 1px 3px #0001;
-  }
-  .practice-actions {
-    display: flex;
-    flex-direction: column;
-    gap: 9px;
-    margin: 20px 0;
   }
   .practice-conversation > header {
     padding-bottom: 22px;
@@ -1054,53 +996,6 @@
     display: flex;
     gap: 8px;
     margin: 18px 0;
-  }
-  .draft-notice {
-    border: 1px solid var(--line);
-    border-left: 3px solid var(--accent);
-    padding: 12px;
-    margin: 18px 0;
-    background: var(--selected);
-    font-size: 0.8571rem;
-    border-radius: 6px;
-  }
-  .draft-notice button {
-    font-size: 0.8571rem;
-  }
-  .integration-heading {
-    display: flex;
-    align-items: center;
-    gap: 18px;
-    margin: 6px 0 28px;
-  }
-  .integration-heading h2 {
-    font-size: 1.6429rem;
-  }
-  .integration-heading p {
-    font-size: 0.9286rem;
-  }
-  .integration-heading > a {
-    margin-left: auto;
-    font-size: 0.8571rem;
-  }
-  .integration-mark {
-    width: 58px;
-    height: 58px;
-    display: grid;
-    place-items: center;
-    border: 1px solid var(--line);
-    border-radius: 16px;
-    color: var(--accent);
-    flex-shrink: 0;
-  }
-  .integration-flow {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 28px;
-    color: var(--muted);
-    font-size: 0.8571rem;
-    flex-wrap: wrap;
   }
   .integration-flow span {
     padding: 7px 12px;
@@ -1165,6 +1060,311 @@
     margin-bottom: 16px;
   }
 }
+@layer components {
+  .quiet-button {
+    background: transparent;
+    border-color: transparent;
+  }
+  button:active:not(:disabled),
+  .button:active {
+    filter: brightness(0.96);
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--muted);
+    opacity: 1;
+  }
+  input,
+  textarea {
+    caret-color: var(--accent);
+  }
+  ::selection {
+    background: var(--selected);
+    color: var(--text);
+  }
+  .profile-picker {
+    display: none;
+  }
+  .list-label {
+    color: var(--muted);
+    font-size: 0.8571rem;
+    font-weight: 500;
+  }
+  .editor-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: var(--surface);
+    padding: 24px 0 16px;
+  }
+  .editor-title {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .editor-title h2 {
+    overflow-wrap: anywhere;
+    font-size: 1.5714rem;
+  }
+  .version-label,
+  .change-label {
+    color: var(--muted);
+    font-size: 0.8571rem;
+  }
+  .editor-save {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+  .editor-tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin: 16px 0 0;
+    align-items: center;
+  }
+  .section-tabs {
+    margin-top: 0;
+  }
+  .settings-panel {
+    padding-top: 24px;
+  }
+  .section-intro {
+    margin: 0 0 20px;
+    max-width: 65ch;
+  }
+  .settings-disclosure {
+    margin: 16px 0;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  .settings-disclosure + .settings-disclosure {
+    border-top: 0;
+    margin-top: -16px;
+  }
+  .settings-disclosure > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px 0;
+    list-style: none;
+  }
+  .settings-disclosure > summary::-webkit-details-marker {
+    display: none;
+  }
+  .settings-disclosure summary strong {
+    font-weight: 550;
+    font-size: 1rem;
+  }
+  .settings-disclosure summary small {
+    display: block;
+    color: var(--muted);
+    margin-top: 3px;
+    font-size: 0.8571rem;
+    font-weight: 400;
+  }
+  .settings-disclosure > summary svg {
+    flex-shrink: 0;
+    color: var(--muted);
+  }
+  .settings-disclosure[open] > summary svg {
+    transform: rotate(180deg);
+  }
+  .disclosure-content {
+    padding: 4px 0 12px;
+  }
+  .disclosure-content > :last-child {
+    margin-bottom: 0;
+  }
+  .voice-model-section > h4:first-child {
+    margin-top: 0;
+  }
+  .voice-model-section > .settings-disclosure {
+    margin-bottom: 28px;
+  }
+  .catalog-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 24px;
+    border-top: 1px solid var(--line);
+    padding-top: 12px;
+    font-size: 0.8571rem;
+  }
+  .action-menu {
+    position: relative;
+    border: 0;
+    margin: 0;
+    flex-shrink: 0;
+  }
+  .action-menu > summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 40px;
+    padding: 7px 10px;
+    border-radius: 8px;
+    list-style: none;
+    font-weight: 500;
+  }
+  .action-menu > summary::-webkit-details-marker {
+    display: none;
+  }
+  .action-menu > summary:hover,
+  .action-menu[open] > summary {
+    background: var(--bg);
+  }
+  .action-menu-items {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    z-index: 10;
+    padding: 6px;
+    min-width: 200px;
+    max-width: calc(100vw - 40px);
+    background: var(--surface);
+    border: 1px solid var(--control-border);
+    border-radius: 10px;
+  }
+  .action-menu-items button {
+    display: flex;
+    justify-content: flex-start;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    padding: 10px;
+    min-height: 44px;
+    font-size: 1rem;
+  }
+  .practice-setup .segmented {
+    margin: 0 0 18px;
+  }
+  .practice-setup > fieldset {
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+  .practice-setup > fieldset > label {
+    margin-bottom: 14px;
+  }
+  .practice-actions {
+    flex-direction: row;
+    margin: 8px 0 12px;
+    position: sticky;
+    top: 0;
+    z-index: 4;
+    background: var(--surface);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 0;
+  }
+  .practice-actions > button {
+    flex: 1;
+  }
+  .practice-actions .action-menu-items {
+    right: 0;
+  }
+  .practice-model-settings .settings-panel {
+    padding-top: 16px;
+  }
+  .practice-model-settings .settings-disclosure {
+    margin: 12px 0;
+  }
+  .practice-model-settings .settings-disclosure + .settings-disclosure {
+    margin-top: -12px;
+  }
+  .practice-model-settings .detail-tabs {
+    margin: 0;
+  }
+  .practice-model-settings .section-tabs button {
+    font-size: 0.9286rem;
+    padding-inline: 8px;
+  }
+  .practice-model-settings .catalog-footer {
+    display: block;
+  }
+  .practice-model-settings .catalog-footer button {
+    margin-top: 8px;
+  }
+  .draft-notice {
+    margin: 18px 0;
+    background: var(--selected);
+    font-size: 0.8571rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    border: 0;
+    border-radius: 8px;
+    padding: 12px;
+  }
+  .draft-notice button {
+    font-size: 0.8571rem;
+    background: transparent;
+  }
+  .integration-heading {
+    margin: 6px 0 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    margin-bottom: 22px;
+  }
+  .integration-heading p {
+    max-width: 68ch;
+    margin: 0;
+  }
+  .integration-heading > a {
+    margin-left: auto;
+    font-size: 0.8571rem;
+    flex-shrink: 0;
+  }
+  .integration-page {
+    max-width: 1180px;
+    width: 100%;
+  }
+  .integration-page .editor-topbar {
+    padding-top: 0;
+  }
+  .integration-page .editor-tools {
+    margin-top: 8px;
+  }
+  .integration-flow {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 28px;
+    color: var(--muted);
+    font-size: 0.8571rem;
+    flex-wrap: wrap;
+  }
+  .call-date {
+    margin: 6px 0;
+    font-size: 0.8571rem;
+  }
+  .filter-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .filter-row select {
+    background: transparent;
+    font-size: 0.8571rem;
+    flex: 1;
+    border-color: var(--control-border);
+    padding: 8px;
+    min-width: 110px;
+  }
+}
 @layer responsive {
   @media (max-width: 74.375em) {
     .app-shell {
@@ -1192,11 +1392,8 @@
       flex-direction: column;
       gap: 10px;
     }
-    .editor-heading > button {
-      align-self: flex-start;
-    }
     .playground-layout {
-      grid-template-columns: 285px minmax(0, 1fr);
+      grid-template-columns: 340px minmax(0, 1fr);
     }
     .practice-conversation {
       padding: 24px;
@@ -1206,9 +1403,6 @@
     }
     .integration-heading {
       flex-wrap: wrap;
-    }
-    .integration-heading > a {
-      margin-left: 76px;
     }
   }
   @media (max-width: 56.25em) {
@@ -1355,28 +1549,104 @@
     .profile-list {
       border-right: 0;
       border-bottom: 1px solid var(--line);
-      max-height: 220px;
-      padding: 12px 18px;
+      padding: 12px 20px;
+      overflow: visible;
+    }
+    .profile-row,
+    .profile-list .list-divider {
+      display: none;
+    }
+    .profile-picker {
+      display: flex;
+      flex: 1;
+      order: 1;
+      margin: 0;
+      min-width: 0;
+    }
+    .profile-list {
+      display: flex;
+      align-items: flex-end;
+      gap: 12px;
+    }
+    .profile-list .section-heading {
+      order: 2;
+      flex-shrink: 0;
+      margin: 0;
+    }
+    .profile-list .list-label {
+      display: none;
     }
     .profile-list .section-heading {
       margin-bottom: 4px;
+      padding: 0;
     }
-    .profile-row {
-      padding: 9px 10px;
+    .profile-picker select {
+      min-height: 44px;
+      font-size: 1.1429rem;
+    }
+    .editor-topbar {
+      margin-inline: -20px;
+      padding: 18px 20px 12px;
+    }
+    .editor-save {
+      width: auto;
+      display: grid;
+      grid-template-columns: auto auto;
+      gap: 6px;
+    }
+    .editor-save .change-label {
+      grid-column: 1 / -1;
+    }
+    .editor-heading {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+    }
+    .editor-tools {
+      column-gap: 8px;
+      row-gap: 4px;
+    }
+
+    .action-menu > summary {
+      min-height: 44px;
+    }
+    .section-tabs {
+      overflow-x: auto;
+    }
+    .catalog-footer {
+      align-items: flex-start;
+    }
+    .practice-actions {
+      position: fixed;
+      top: auto;
+      bottom: 0;
+      left: 0;
+      right: 0;
       margin: 0;
+      padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
+      border-top: 1px solid var(--line);
+      z-index: 8;
+    }
+    .practice-actions .action-menu-items {
+      top: auto;
+      bottom: calc(100% + 4px);
+    }
+    .practice-model-settings .section-tabs button {
+      padding-inline: 6px;
+    }
+    .integration-page .editor-topbar {
+      padding: 16px 0 12px;
+      margin: 0;
+      position: static;
     }
     .profile-row small {
       display: none;
-    }
-    .profile-monogram {
-      height: 26px;
-      width: 26px;
     }
     .profile-list .list-divider {
       margin: 5px;
     }
     .configuration-editor {
-      padding: 24px 20px 48px;
+      padding: 0 20px 32px;
       overflow: visible;
     }
     .configuration-editor .editor-tools {
@@ -1386,10 +1656,8 @@
       min-height: 40px;
     }
     .editor-heading {
+      flex-wrap: wrap;
       gap: 14px;
-    }
-    .editor-heading > button {
-      width: 100%;
     }
     .configuration-editor input,
     .configuration-editor textarea,
@@ -1408,8 +1676,10 @@
     .playground-layout {
       display: block;
       overflow: auto;
+      padding-bottom: calc(88px + env(safe-area-inset-bottom));
     }
     .practice-setup {
+      overflow: visible;
       border: 0;
       border-bottom: 1px solid var(--line);
       padding: 24px 20px;
@@ -1439,16 +1709,8 @@
     .integration-heading {
       gap: 12px;
     }
-    .integration-heading h2 {
-      font-size: 1.5714rem;
-    }
     .integration-heading > a {
       margin-left: 0;
-    }
-    .integration-mark {
-      width: 44px;
-      height: 44px;
-      border-radius: 12px;
     }
     .integration-flow {
       gap: 6px;
@@ -1461,7 +1723,7 @@
       width: 12px;
     }
     .integration-page .configuration-editor {
-      padding-top: 24px;
+      padding: 20px 0;
     }
     .call-dialog {
       padding: 22px 20px;

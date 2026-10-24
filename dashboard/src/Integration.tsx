@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowUpRight, Plug, ChevronRight } from "lucide-react";
+import { ArrowUpRight, ChevronRight } from "lucide-react";
 import { api, message } from "./api";
 import { tabKeys } from "./a11y";
 import type { Session, Setup, Status } from "./types";
@@ -27,21 +27,12 @@ export default function Integration({
   }, []);
   return (
     <div className="integration-page">
-      <section className="integration-heading">
-        <div className="integration-mark">
-          <Plug size={25} />
-        </div>
-        <div>
-          <span className="eyebrow">
-            AI THAT PREPARES AND MONITORS THE CALL
-          </span>
-          <h2>Tell Hermes how to use your calling agent.</h2>
-          <p className="muted">
-            Hermes reads this guide, gathers the missing details, chooses a
-            personality, and sends an approved brief to the call AI. After the
-            call, it returns the recording and transcript.
-          </p>
-        </div>
+      <header className="integration-heading">
+        <p className="muted">
+          Hermes gathers the brief and returns the recording and transcript.
+          <br />
+          Edit the speaking agent in Personalities.
+        </p>
         <a
           className="button"
           href={session.hermes_url}
@@ -50,31 +41,7 @@ export default function Integration({
         >
           Open Hermes <ArrowUpRight size={15} />
         </a>
-      </section>
-      <p className="integration-boundary">
-        For the AI speaking on the call, use Personalities → Global Defaults and
-        the chosen personality. Their Inspect AI Inputs view shows the assembled
-        prompt and request settings. The guide here is read by Hermes and is not
-        copied into that prompt.
-      </p>
-      <p className="muted">
-        Last MCP setup request:{" "}
-        {status?.last_hermes_request?.observed_at
-          ? new Date(status.last_hermes_request.observed_at).toLocaleString(
-              "en-GB",
-              { timeZone: session.timezone },
-            )
-          : "No request recorded yet"}
-      </p>
-      <div className="integration-flow">
-        <span>Hermes</span>
-        <ChevronRight size={16} />
-        <span>Calling MCP</span>
-        <ChevronRight size={16} />
-        <span>Voice agent</span>
-        <ChevronRight size={16} />
-        <span>Spanish DIGI</span>
-      </div>
+      </header>
       <div
         className="detail-tabs"
         role="tablist"
@@ -89,7 +56,7 @@ export default function Integration({
           aria-controls="integration-panel-guide"
           onClick={() => setTab("guide")}
         >
-          Hermes Calling Guide
+          Calling Guide
         </button>
         <button
           role="tab"
@@ -109,7 +76,7 @@ export default function Integration({
           aria-controls="integration-panel-setup"
           onClick={() => setTab("setup")}
         >
-          Connection Guide
+          Connection
         </button>
       </div>
       {error && (
@@ -140,10 +107,9 @@ export default function Integration({
         >
           <h3>Tools offered to Hermes by the calling server</h3>
           <p className="muted">
-            MCP is the connection that lets Hermes request actions from the
-            calling service. These are the server’s live tool descriptions and
-            input fields. Hermes’s own settings select which tools it enables;
-            this catalog also includes compatibility tools.
+            These live descriptions define what Hermes can request. Hermes’s
+            settings control which tools are enabled, including compatibility
+            tools.
           </p>
           {data?.tools.map((tool) => (
             <details className="tool-row" key={tool.name}>
@@ -166,7 +132,31 @@ export default function Integration({
           id="integration-panel-setup"
           aria-labelledby="integration-tab-setup"
         >
-          <h3>Hermes setup</h3>
+          <h3>How the connection works</h3>
+          <div className="integration-flow">
+            <span>Hermes</span>
+            <ChevronRight size={16} />
+            <span>Calling MCP</span>
+            <ChevronRight size={16} />
+            <span>Voice agent</span>
+            <ChevronRight size={16} />
+            <span>Spanish DIGI</span>
+          </div>
+          <p className="muted">
+            Last MCP setup request:{" "}
+            {status?.last_hermes_request?.observed_at
+              ? new Date(status.last_hermes_request.observed_at).toLocaleString(
+                  "en-GB",
+                  { timeZone: session.timezone },
+                )
+              : "No request recorded yet"}
+          </p>
+          <p>
+            The calling guide goes to Hermes. The voice agent receives the
+            instructions from Global Defaults, the selected personality, and the
+            approved brief. Inspect AI Inputs in Personalities shows that
+            combined prompt.
+          </p>
           <p>
             Your existing Hermes instance uses the private calling-agent MCP
             connection. It keeps its current account and model.
@@ -193,7 +183,7 @@ export default function Integration({
             </li>
           </ol>
           <p>
-            Save calling-specific guidance in the Hermes Calling Guide tab. Use
+            Save calling-specific guidance in the Calling Guide tab. Use
             Hermes’s dashboard for its own model, account, tools, and other
             tasks.
           </p>
