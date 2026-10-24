@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import httpx
 from fastapi import WebSocket
 
+from app.call_ai_inputs import ModelRequestTrace, model_options, model_tools
 from app.db.deployment import _lock_is_active
 from app.models import ContextPacket
 
@@ -38,6 +39,7 @@ class PracticeSession:
     error: str | None = None
     closed: asyncio.Event = field(default_factory=asyncio.Event)
     closer: asyncio.Task[Any] | None = None
+    request_trace: ModelRequestTrace = field(default_factory=ModelRequestTrace)
 
     def view(self) -> dict[str, Any]:
         return {
@@ -76,7 +78,7 @@ class Playground:
                 raise ValueError("The calling service is being updated. Try again shortly.")
             configuration = await self.control.resolve(packet, overrides=overrides)
             packet = self.control.normalize_packet(packet, configuration)
-            configuration["effective_prompt"] = self.control.prompt(packet, configuration)
+            self.control.freeze_inputs(packet, configuration, mode)
             session = PracticeSession(secrets.token_urlsafe(24), mode, packet, configuration)
             self.active = session
             session.timer = asyncio.create_task(self._expire(session))
@@ -91,6 +93,15 @@ class Playground:
         if session is None:
             raise LookupError("Practice session not found")
         return session
+
+    async def inputs(self, session_id: str) -> dict[str, Any]:
+        session = self.get(session_id)
+        trace = session.voice.request_trace if session.voice else session.request_trace
+        return {
+            "configured": session.configuration.get("ai_inputs"),
+            "last_request": await asyncio.to_thread(trace.view),
+            "saved_system_prompt": session.configuration.get("effective_prompt"),
+        }
 
     async def _expire(self, session: PracticeSession) -> None:
         while self.active is session:
@@ -223,39 +234,15 @@ class Playground:
             ]
             messages.append({"role": "user", "content": text})
             body: dict[str, Any] = {
-                "model": config.dialogue_model,
+                **model_options(config, "text"),
                 "messages": messages,
-                "max_tokens": 512,
-                "temperature": config.dialogue_temperature,
-                "tools": [
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": "finish_call",
-                            "description": "Finish this practice conversation.",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "farewell": {"type": "string"},
-                                    "do_not_call": {"type": "boolean"},
-                                },
-                                "required": ["farewell"],
-                            },
-                        },
-                    }
-                ],
+                "tools": model_tools("text"),
             }
-            if config.reasoning_effort is not None:
-                body["reasoning"] = {"effort": config.reasoning_effort}
-            if config.dialogue_provider:
-                body["provider"] = {
-                    "only": [config.dialogue_provider, *config.dialogue_fallback_providers],
-                    "allow_fallbacks": bool(config.dialogue_fallback_providers),
-                    "require_parameters": True,
-                }
             try:
                 started = time.monotonic()
-                async with httpx.AsyncClient(timeout=30) as client:
+                async with httpx.AsyncClient(
+                    timeout=30, event_hooks={"request": [session.request_trace.capture]}
+                ) as client:
                     response = await client.post(
                         "https://openrouter.ai/api/v1/chat/completions",
                         json=body,

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
 from app.android_config import AndroidConfig
+from app.call_ai_inputs import Mode, describe_inputs
 from app.call_personalities import PERSONALITIES
 from app.control_models import (
     DEFAULT_CALLING_GUIDE,
@@ -154,6 +155,32 @@ class ControlPlane:
                 "max_duration_seconds": config.call_duration(packet.max_duration_seconds),
             }
         )
+
+    def freeze_inputs(
+        self, packet: ContextPacket, snapshot: dict[str, Any], mode: Mode = "voice"
+    ) -> None:
+        snapshot["effective_prompt"] = self.prompt(packet, snapshot)
+        snapshot["ai_inputs"] = describe_inputs(
+            packet, snapshot, self.runtime_config(snapshot), mode
+        )
+
+    async def call_inputs(self, call_id: str) -> dict[str, Any]:
+        call = await self.db.get_call(call_id)
+        if not call:
+            raise LookupError("Call not found")
+        snapshot = await self.db.control_plan(call["plan_id"])
+        row = await self.db.fetch_one(
+            "SELECT request_json FROM call_model_requests WHERE call_id=?", (call_id,)
+        )
+        latest = await asyncio.to_thread(json.loads, row["request_json"]) if row else None
+        runtime = self.service._runtime
+        if runtime and runtime.call_id == call_id and runtime.voice:
+            latest = await asyncio.to_thread(runtime.voice.request_trace.view)
+        return {
+            "configured": snapshot.get("ai_inputs") if snapshot else None,
+            "last_request": latest,
+            "saved_system_prompt": snapshot.get("effective_prompt") if snapshot else None,
+        }
 
     @staticmethod
     def reference(snapshot: dict[str, Any] | None) -> dict[str, Any] | None:

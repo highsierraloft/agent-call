@@ -135,7 +135,7 @@ class AndroidCallService:
                 "profile_not_found", "Select a profile from get_calling_setup"
             ) from exc
         packet = self.control.normalize_packet(request.context, snapshot)
-        snapshot["effective_prompt"] = self.control.prompt(packet, snapshot)
+        self.control.freeze_inputs(packet, snapshot)
         return await prepare_call(
             self.settings,
             self.db,
@@ -277,6 +277,14 @@ class AndroidCallService:
             failed()
         finally:
             await self.terminate_call(runtime.call_id, "android_media_disconnected")
+            self._spawn(self._save_model_request(runtime))
+
+    async def _save_model_request(self, runtime: _Call) -> None:
+        if runtime.voice is None:
+            return
+        latest = await asyncio.to_thread(runtime.voice.request_trace.view)
+        if latest is not None:
+            await self.db.control_model_request(runtime.call_id, latest)
 
     async def _fail_voice(self, call_id: str) -> None:
         await self.terminate_call(call_id, "android_voice_failed")

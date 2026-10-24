@@ -53,6 +53,26 @@ this tool before each preparation. The dashboard does not need Hermes's home dir
 Call results include configuration revision references. Full snapshots are available only in the
 authenticated control panel. Older calls without snapshots remain explicitly unrecorded.
 
+**Inspect AI Inputs** separates the call model's starting system prompt into ordered sections,
+with the source of each section and whether it is editable. It also shows model parameters,
+speech settings, the `finish_call` tool definition, connection and timer messages, and an initial
+request example. Global Defaults, the selected personality, and the approved brief feed the call model.
+The Hermes calling guide is separate: Hermes reads it to prepare and monitor calls; it is not copied
+into the call model's system prompt. The sidebar labels this area **Hermes**.
+
+The **Latest Request** view reads the actual serialized outgoing OpenRouter request body,
+including messages, tools, and model options. A request hook retains the immutable bytes in memory;
+it performs no database write or JSON parsing in the audio path. Only the latest body is retained,
+up to 4 MiB. Oversized bodies are marked omitted. Request capture precedes sending and does not
+prove provider receipt or a successful response. Authentication headers and credentials are never captured.
+Provider-internal instructions and unspecified defaults are outside this application's visibility.
+
+New plans freeze the configured input description. A completed telephone session stores its last
+captured request in `call_model_requests`; practice inspection stays ephemeral. Inspection endpoints
+use the same owner-only authentication as other administration APIs. Capture failure or process loss
+must remain visible as missing data. Earlier calls retain any recorded starting prompt, but missing
+tool/request snapshots are never reconstructed from current code. Input descriptions can be downloaded as JSON.
+
 Set `android.dashboard_config_file` to a private, read-only JSON mount with `bridge_token`,
 `owner_login`, `public_origin`, `trusted_proxy_ips`, `timezone`, and `hermes_url`.
 The bridge token is a separate random credential of at least 32 characters. The owner login is the
@@ -86,8 +106,8 @@ Browser tests use synthetic records and intercepted APIs; they cannot place a te
 `Dockerfile.control-tests` provides an isolated Linux WebKit environment when the local runtime
 is unavailable. Run it with no external network after building its dependencies.
 Provider-backed browser acceptance uses synthetic microphone audio, not an unattended real microphone.
-The control-panel gate passed 959 backend tests with two skips and 89.00% coverage.
-Forty browser checks cover Chromium, dark appearance, desktop WebKit, and phone WebKit.
+The control-panel gate passed 965 backend tests with two skips and 89.07% coverage.
+Forty-eight browser checks cover Chromium, dark appearance, desktop WebKit, and phone WebKit.
 They include the local audio handshake, microphone release, permission denial, and stable pagination.
 The production image also removes Caddy's file capability so it runs with all Linux capabilities dropped.
 A provider-backed browser replay completed four languages and interruptions. Four measured reply starts
@@ -96,6 +116,9 @@ These are small samples, not latency percentiles. The earlier telephone-transpor
 1.082–1.262 seconds. Different transports, input samples, and provider timing prevent a direct regression claim.
 Explicit stop and tab closure both released practice capacity. Native Hermes model discovery,
 authenticated MP3 seeking, Markdown delivery, and the live voice/model catalogs passed without dialing.
+The input-inspection update preserves the prior system prompt byte-for-byte. A provider-backed browser
+check captured the outgoing Gemini 3.1 Flash-Lite request, its runtime timer and `finish_call` definition,
+then released practice capacity. It placed no telephone call and did not change saved configurations.
 
 ## Results and limitations
 

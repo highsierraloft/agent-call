@@ -32,11 +32,14 @@ export default function Integration({
           <Plug size={25} />
         </div>
         <div>
-          <span className="eyebrow">HERMES CONNECTION</span>
-          <h2>One source for calling instructions.</h2>
+          <span className="eyebrow">
+            AI THAT PREPARES AND MONITORS THE CALL
+          </span>
+          <h2>Tell Hermes how to use your calling agent.</h2>
           <p className="muted">
-            Hermes fetches the current guide and personality library before
-            preparing a call.
+            Hermes reads this guide, gathers the missing details, chooses a
+            personality, and sends an approved brief to the call AI. After the
+            call, it returns the recording and transcript.
           </p>
         </div>
         <a
@@ -48,6 +51,12 @@ export default function Integration({
           Open Hermes <ArrowUpRight size={15} />
         </a>
       </section>
+      <p className="integration-boundary">
+        For the AI speaking on the call, use Personalities → Global Defaults and
+        the chosen personality. Their Inspect AI Inputs view shows the assembled
+        prompt and request settings. The guide here is read by Hermes and is not
+        copied into that prompt.
+      </p>
       <p className="muted">
         Last MCP setup request:{" "}
         {status?.last_hermes_request?.observed_at
@@ -80,7 +89,7 @@ export default function Integration({
           aria-controls="integration-panel-guide"
           onClick={() => setTab("guide")}
         >
-          Calling Instructions
+          Hermes Calling Guide
         </button>
         <button
           role="tab"
@@ -90,7 +99,7 @@ export default function Integration({
           aria-controls="integration-panel-tools"
           onClick={() => setTab("tools")}
         >
-          Exposed Tools
+          MCP Tools
         </button>
         <button
           role="tab"
@@ -129,10 +138,12 @@ export default function Integration({
           id="integration-panel-tools"
           aria-labelledby="integration-tab-tools"
         >
-          <h3>What the MCP server exposes</h3>
+          <h3>Tools offered to Hermes by the calling server</h3>
           <p className="muted">
-            These are the live tool descriptions and schemas. A tool being
-            exposed does not prove that a phone call is ready.
+            MCP is the connection that lets Hermes request actions from the
+            calling service. These are the server’s live tool descriptions and
+            input fields. Hermes’s own settings select which tools it enables;
+            this catalog also includes compatibility tools.
           </p>
           {data?.tools.map((tool) => (
             <details className="tool-row" key={tool.name}>
@@ -182,7 +193,7 @@ export default function Integration({
             </li>
           </ol>
           <p>
-            Save calling-specific guidance in the Calling Instructions tab. Use
+            Save calling-specific guidance in the Hermes Calling Guide tab. Use
             Hermes’s dashboard for its own model, account, tools, and other
             tasks.
           </p>

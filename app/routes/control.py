@@ -123,7 +123,13 @@ async def preview(
     try:
         snapshot = await control.resolve(body.context, overrides=body.overrides)
         packet = control.normalize_packet(body.context, snapshot)
-        return {"prompt": control.prompt(packet, snapshot), "configuration": snapshot}
+        control.freeze_inputs(packet, snapshot, body.mode)
+        return {
+            "prompt": control.prompt(packet, snapshot),
+            "configuration": snapshot,
+            "configured": snapshot["ai_inputs"],
+            "last_request": None,
+        }
     except (ValueError, LookupError) as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -163,6 +169,16 @@ async def detail(
 ) -> dict[str, Any]:
     try:
         return await control.detail(call_id, after)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.get("/calls/{call_id}/ai-inputs")
+async def call_ai_inputs(
+    call_id: str, control: ControlPlane = Depends(require_control)
+) -> dict[str, Any]:
+    try:
+        return await control.call_inputs(call_id)
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
 
@@ -259,6 +275,16 @@ async def practice_state(
 ) -> dict[str, Any]:
     try:
         return control.practice.get(session_id).view()
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.get("/practice/{session_id}/ai-inputs")
+async def practice_ai_inputs(
+    session_id: str, control: ControlPlane = Depends(require_control)
+) -> dict[str, Any]:
+    try:
+        return await control.practice.inputs(session_id)
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
 

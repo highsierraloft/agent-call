@@ -136,6 +136,48 @@ export interface Metric {
   parts?: { stage: string; seconds: number }[];
   created_at?: string;
 }
+export interface AIInputContract {
+  version: number;
+  mode: "voice" | "text";
+  system_prompt: string;
+  prompt_sections: {
+    id: string;
+    label: string;
+    source: string;
+    editable: boolean;
+    text: string;
+  }[];
+  model_options: {
+    model: string;
+    temperature: number;
+    max_tokens: number;
+    [key: string]: unknown;
+  };
+  tools: {
+    type: string;
+    function: { name: string; description: string; parameters: unknown };
+  }[];
+  initial_request_example: unknown;
+  runtime_messages: Record<string, unknown>;
+  speech_settings: Record<string, unknown>;
+  limits: Record<string, unknown>;
+  scope: string;
+}
+export interface AIInputInspection {
+  configured: AIInputContract | null;
+  last_request: {
+    recorded_at: string;
+    bytes: number;
+    body: {
+      model?: string;
+      messages?: unknown[];
+      [key: string]: unknown;
+    } | null;
+    omitted: boolean;
+    scope: string;
+  } | null;
+  saved_system_prompt?: string | null;
+}
 export interface Detail {
   call_id: string;
   state: string;

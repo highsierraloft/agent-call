@@ -22,7 +22,7 @@ const sections = [
   { id: "calls", label: "Calls", icon: Phone },
   { id: "personalities", label: "Personalities", icon: SlidersHorizontal },
   { id: "playground", label: "Playground", icon: AudioLines },
-  { id: "integration", label: "Integration", icon: Plug },
+  { id: "integration", label: "Hermes", icon: Plug },
 ];
 export default function App() {
   const [path, setPath] = useState(location.pathname),
@@ -165,7 +165,11 @@ export default function App() {
       </aside>
       <main className="workspace">
         <header className="app-toolbar">
-          <h1>{section.label}</h1>
+          <h1>
+            {section.id === "integration"
+              ? "Hermes Integration"
+              : section.label}
+          </h1>
           <div className="toolbar-actions">
             <span
               className="readiness"

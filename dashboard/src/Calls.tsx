@@ -11,6 +11,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { api, message } from "./api";
+import AIInputs from "./AIInputs";
 import { tabKeys } from "./a11y";
 import {
   languages,
@@ -19,6 +20,7 @@ import {
   type Call,
   type Detail,
   type Session,
+  type AIInputInspection,
 } from "./types";
 
 export function date(
@@ -356,6 +358,10 @@ function CallDetail({
     [saved, setSaved] = useState(false),
     [ending, setEnding] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [inputs, setInputs] = useState<AIInputInspection | null>(null);
+  async function showInputs() {
+    setInputs(await api<AIInputInspection>("/calls/" + id + "/ai-inputs"));
+  }
   useEffect(() => {
     if (!detail || terminal(detail.state)) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -653,8 +659,13 @@ function CallDetail({
                 <dt>Voice model</dt>
                 <dd>{detail.configuration.voice.inworld_model}</dd>
               </dl>
+              <button
+                onClick={() => showInputs().catch((e) => setError(message(e)))}
+              >
+                Inspect AI Inputs
+              </button>
               <details>
-                <summary>Exact prompt used</summary>
+                <summary>Recorded starting system prompt</summary>
                 <pre className="prompt-preview">{detail.prompt}</pre>
               </details>
               <details>
@@ -671,6 +682,13 @@ function CallDetail({
               </p>
             </div>
           ))}
+        {tab === "settings" && inputs && (
+          <AIInputs
+            data={inputs}
+            onClose={() => setInputs(null)}
+            onRefresh={showInputs}
+          />
+        )}
         {tab === "diagnostics" && (
           <div className="reading">
             <h3>Call diagnostics</h3>

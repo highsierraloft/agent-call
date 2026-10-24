@@ -125,6 +125,86 @@ export async function installFixture(page: Page) {
     voice,
     unsaved: false,
   };
+  const inspect = (prompt: string, mode = "voice") => ({
+    configured: {
+      version: 1,
+      mode,
+      system_prompt: prompt,
+      prompt_sections: [
+        {
+          id: "global",
+          label: "Shared conversation instructions",
+          source: "Global Defaults",
+          editable: true,
+          text: globals.prompts.conversation,
+        },
+        {
+          id: "rules",
+          label: "Authority and runtime rules",
+          source: "Runtime rules",
+          editable: false,
+          text: "Act only within the approved brief.",
+        },
+        {
+          id: "personality",
+          label: "Personality and purpose",
+          source: "Selected personality + Global Defaults",
+          editable: true,
+          text: prompt,
+        },
+      ],
+      model_options: {
+        model: voice.dialogue_model,
+        temperature: 0.4,
+        max_tokens: 512,
+        reasoning: { effort: "none" },
+      },
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "finish_call",
+            description: "Close the current conversation.",
+            parameters: {},
+          },
+        },
+      ],
+      initial_request_example: {
+        model: voice.dialogue_model,
+        messages: [{ role: "system", content: prompt }],
+      },
+      runtime_messages: {
+        connection_event: "Internal connection event",
+        history: "Recipient transcripts and heard speech",
+      },
+      speech_settings: {
+        enabled: mode === "voice",
+        transcription_provider: "soniox",
+        speech_provider: "inworld",
+        voice: "Wade",
+      },
+      limits: {
+        call_budget_seconds: 1800,
+        model_timeout_seconds: mode === "voice" ? 10 : 30,
+      },
+      scope: "Application-owned inputs.",
+    },
+    last_request: state.practice?.messages.length
+      ? {
+          recorded_at: "2026-10-24T14:00:00Z",
+          bytes: 1000,
+          body: {
+            model: voice.dialogue_model,
+            messages: state.practice.messages.map((m: any) => ({
+              role: m.speaker === "callee" ? "user" : "assistant",
+              content: m.text,
+            })),
+          },
+          omitted: false,
+          scope: "Latest outgoing request body; headers are excluded.",
+        }
+      : null,
+  });
   const calls = [
     {
       call_id: "call_demo_1",
@@ -223,6 +303,11 @@ export async function installFixture(page: Page) {
     }
     if (path === "/prompt-preview")
       return respond({
+        ...inspect(
+          body.overrides?.profile?.prompt ||
+            records["profile:warm"].value.prompt,
+          body.mode,
+        ),
         prompt:
           "Your identity is an AI calling assistant.\n" +
           (body.overrides?.profile?.prompt ||
@@ -297,6 +382,16 @@ export async function installFixture(page: Page) {
           call_id: id,
           state: state.active ? "active" : "completed",
         };
+      if (parts[3] === "ai-inputs")
+        return respond(
+          id === "call_demo_2"
+            ? {
+                configured: null,
+                last_request: null,
+                saved_system_prompt: null,
+              }
+            : inspect("Recorded prompt for this call."),
+        );
       if (parts[3] === "end") {
         state.ended++;
         state.active = null;
@@ -375,6 +470,8 @@ export async function installFixture(page: Page) {
       };
       return respond(state.practice);
     }
+    if (path === "/practice/practice_local/ai-inputs")
+      return respond(inspect("Saved practice prompt.", state.practice.mode));
     if (path === "/practice/practice_local/text") {
       state.practice.messages.push(
         { speaker: "callee", text: body.text },

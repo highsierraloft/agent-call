@@ -18,10 +18,11 @@ import {
   type Profile,
   type Revision,
   type Session,
-  type Snapshot,
+  type AIInputInspection,
   type Voice,
 } from "./types";
 import VoiceFields from "./VoiceFields";
+import AIInputs from "./AIInputs";
 
 type Editable = Global | Profile | Guide;
 export default function Profiles({
@@ -179,7 +180,7 @@ export function ConfigurationEditor({
     [busy, setBusy] = useState(false),
     [history, setHistory] = useState<Revision<Editable>[]>([]),
     [showHistory, setShowHistory] = useState(false),
-    [preview, setPreview] = useState<string | null>(null);
+    [preview, setPreview] = useState<AIInputInspection | null>(null);
   useEffect(() => {
     if (initial) return;
     let alive = true;
@@ -302,18 +303,14 @@ export function ConfigurationEditor({
       context.language = (d.profile?.voice_overrides.conversation_languages ||
         d.global?.voice.conversation_languages ||
         session.setup.defaults.conversation_languages)[0];
-      const result = await api<{ prompt: string; configuration: Snapshot }>(
-        "/prompt-preview",
-        "POST",
-        {
-          context,
-          overrides: {
-            ...(d.global ? { global: d.global } : {}),
-            ...(d.profile ? { profile: d.profile } : {}),
-          },
+      const result = await api<AIInputInspection>("/prompt-preview", "POST", {
+        context,
+        overrides: {
+          ...(d.global ? { global: d.global } : {}),
+          ...(d.profile ? { profile: d.profile } : {}),
         },
-      );
-      setPreview(result.prompt);
+      });
+      setPreview(result);
     } catch (e) {
       setError(message(e));
     }
@@ -347,20 +344,21 @@ export function ConfigurationEditor({
       entity === "global"
         ? "Global Defaults"
         : entity === "guide"
-          ? "Calling Instructions"
+          ? "Hermes Calling Guide"
           : (value as Profile).name;
   return (
     <section className="configuration-editor" ref={editor}>
       <header className="editor-heading">
         <div>
           <span className="eyebrow">
+            {entity === "guide" ? "FOR HERMES · " : "FOR THE CALL AI · "}
             {record.revision ? "VERSION " + record.revision : "NEW PERSONALITY"}
             {dirty ? " · UNSAVED CHANGES" : ""}
           </span>
           <h2>{title}</h2>
           <p className="muted">
             {entity === "guide"
-              ? "Hermes reads these instructions before preparing its next call."
+              ? "Hermes reads this guide before preparing its next call. It is not the voice agent’s conversation prompt."
               : "Saving changes future calls. Prepared and active calls keep their settings."}
           </p>
         </div>
@@ -381,7 +379,7 @@ export function ConfigurationEditor({
           <>
             <button onClick={showPrompt}>
               <FileText size={16} />
-              Preview Prompt
+              Inspect AI Inputs
             </button>
             <button
               onClick={() => {
@@ -485,17 +483,11 @@ export function ConfigurationEditor({
         </section>
       )}
       {preview !== null && (
-        <section className="preview-panel">
-          <div className="row-top">
-            <h3>Effective prompt preview</h3>
-            <button onClick={() => setPreview(null)}>Close Preview</button>
-          </div>
-          <p className="muted">
-            Includes the sample brief and fixed identity, authorization, and
-            tool instructions. No telephone call is made.
-          </p>
-          <pre className="prompt-preview">{preview}</pre>
-        </section>
+        <AIInputs
+          data={preview}
+          onClose={() => setPreview(null)}
+          onRefresh={showPrompt}
+        />
       )}
       {rawMode ? (
         <label className="raw-editor">
@@ -554,6 +546,12 @@ function GlobalFields({
     <>
       <section className="form-section">
         <h3>Conversation</h3>
+        <p className="muted">
+          These shared instructions go to the AI speaking on the call. The
+          selected personality and the individual call brief add their
+          instructions. Voice and model overrides in a personality take
+          precedence over these defaults.
+        </p>
         <label>
           How the agent talks
           <textarea

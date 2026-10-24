@@ -105,5 +105,8 @@ API types, and deployment definitions aligned with behavior changes.
   Do not reconstruct missing historical snapshots or load configuration in the audio loop.
 - Browser practice has no dialing capability and cannot change real recipient opt-outs.
   It shares capacity with phone calls and must release provider resources after cancellation.
+- Keep the call AI input inspector tied to the same prompt, tool, and parameter builders used by execution.
+  Capture only the latest serialized model request body; exclude headers and credentials. Do not parse
+  or persist large request bodies in the audio path. Mark missing historical request data explicitly.
 - Run the backend gate and `npm ci && npm run build && npm test` in `dashboard/` for relevant changes.
   Browser regression tests use mocked APIs. Label live-provider practice separately from handset tests.

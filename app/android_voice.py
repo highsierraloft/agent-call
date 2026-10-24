@@ -52,6 +52,15 @@ from pipecat.workers.runner import WorkerRunner
 from pipecat_asterisk import AsteriskFrameSerializer
 
 from app.android_config import AndroidConfig
+from app.call_ai_inputs import (
+    CLOSING_RESERVE_SECONDS,
+    FAREWELL_REPLY_SECONDS,
+    ModelRequestTrace,
+    initial_messages,
+    model_options,
+    model_tools,
+    time_notice,
+)
 from app.contact_preferences import is_direct_opt_out
 from app.inworld_client import InworldVoiceTTSService as InworldTTSService
 from app.models import ContextPacket
@@ -61,7 +70,6 @@ from app.soniox_client import SonioxVoiceSTTService as SonioxSTTService
 from app.spoken_identity import SpeakerIdentityFilter
 from app.voice_prompts import voice_instructions
 
-CLOSING_RESERVE_SECONDS = 15
 logger = logging.getLogger(__name__)
 
 
@@ -177,7 +185,11 @@ class AndroidVoiceSession:
         self._identity_filter = SpeakerIdentityFilter(packet.owner.display_name)
         self._played_response_serial: int | None = None
         self._stt_http = DefaultAsyncHttpxClient(timeout=httpx2.Timeout(8, connect=3))
-        self._llm_http = DefaultAsyncHttpxClient(timeout=httpx2.Timeout(10, connect=3))
+        self.request_trace = ModelRequestTrace()
+        self._llm_http = DefaultAsyncHttpxClient(
+            timeout=httpx2.Timeout(10, connect=3),
+            event_hooks={"request": [self.request_trace.capture]},
+        )
         input_sample_rate = 16000 if browser else 8000
         output_sample_rate = 24000 if browser else 8000
         transport = FastAPIWebsocketTransport(
@@ -258,33 +270,20 @@ class AndroidVoiceSession:
             user_params = LLMUserAggregatorParams(
                 vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.3)),
             )
+        options = model_options(config)
         llm = OpenRouterVoiceLLMService(
             api_key=api_key,
             http_client=self._llm_http,
             settings=OpenRouterVoiceLLMService.Settings(
-                model=config.dialogue_model,
-                max_tokens=512,
-                temperature=config.dialogue_temperature,
+                model=options["model"],
+                max_tokens=options["max_tokens"],
+                temperature=options["temperature"],
                 extra={
-                    "extra_body": {"reasoning": {"effort": config.reasoning_effort}}
-                    if config.reasoning_effort is not None
+                    "extra_body": {"reasoning": options["reasoning"]}
+                    if "reasoning" in options
                     else {}
                 },
-                provider=OpenRouterVoiceLLMService.ProviderPreferences(
-                    sort="latency",
-                    require_parameters=True,
-                    only=(
-                        [config.dialogue_provider, *config.dialogue_fallback_providers]
-                        if config.dialogue_provider
-                        else None
-                    ),
-                    order=[config.dialogue_provider]
-                    if config.dialogue_fallback_providers and config.dialogue_provider
-                    else None,
-                    allow_fallbacks=bool(config.dialogue_fallback_providers)
-                    if config.dialogue_provider
-                    else None,
-                ),
+                provider=OpenRouterVoiceLLMService.ProviderPreferences(**options["provider"]),
             ),
         )
         tts: TTSService
@@ -305,22 +304,14 @@ class AndroidVoiceSession:
             )
         else:
             tts = OpenRouterTTSService(api_key=api_key, model=config.tts_model, voice=config.voice)
+        function = model_tools()[0]["function"]
         tools = ToolsSchema(
             standard_tools=[
                 FunctionSchema(
-                    name="finish_call",
-                    description="End the call ONLY when the recipient explicitly asks to finish, the approved task is complete, or the runtime closing notice arrives. Never use this tool for ordinary conversational replies or mentions of later plans. It speaks your farewell, then hangs up after playback and a reply window. Do not say the farewell separately.",
-                    properties={
-                        "farewell": {
-                            "type": "string",
-                            "description": "A brief farewell in the same language as the latest recipient turn. The tool speaks it; do not output separate closing text.",
-                        },
-                        "do_not_call": {
-                            "type": "boolean",
-                            "description": "Set true only when the recipient requests no further sales calls. This saves an opt-out for this recipient before closing; it does not update an external customer system.",
-                        },
-                    },
-                    required=["farewell"],
+                    name=function["name"],
+                    description=function["description"],
+                    properties=function["parameters"]["properties"],
+                    required=function["parameters"]["required"],
                 )
             ]
         )
@@ -328,13 +319,7 @@ class AndroidVoiceSession:
             configuration.get("effective_prompt") if configuration else None
         ) or voice_instructions(packet, conversation_languages=list(config.conversation_languages))
         context = LLMContext(
-            messages=[
-                {"role": "system", "content": self._system_prompt},
-                {
-                    "role": "user",
-                    "content": "Internal connection event, not recipient speech: the call is connected. Give the approved greeting now.",
-                },
-            ],
+            messages=initial_messages(self._system_prompt),
             tools=tools,
         )
         self._context = context
@@ -528,15 +513,7 @@ class AndroidVoiceSession:
 
     def _add_time_notice(self, *, closing: bool = False) -> None:
         remaining = max(0, int(self._max_call_seconds - (time.monotonic() - self._started_at)))
-        content = f"Runtime notice: about {remaining} seconds remain in this call's time budget. "
-        if closing or remaining <= CLOSING_RESERVE_SECONDS:
-            content += (
-                "The time limit is near. Answer any last point briefly, wrap up warmly without "
-                "a new topic or question, then call finish_call with a brief farewell. "
-                "The tool speaks the farewell; do not say it separately."
-            )
-        else:
-            content += "Continue the approved conversation. Do not announce this timer."
+        content = time_notice(remaining, closing=closing)
         # The Gemini adapter converts additional system messages to user messages.
         # Update the leading instruction so internal timing never becomes recipient speech.
         self._context.messages[0] = {
@@ -577,7 +554,7 @@ class AndroidVoiceSession:
         if guard is not None and (self._closing_task is None or self._closing_task.done()):
 
             async def close_after_reply_window() -> None:
-                await asyncio.sleep(3)
+                await asyncio.sleep(FAREWELL_REPLY_SECONDS)
                 if guard():
                     await self.callbacks.finish(guard)
 

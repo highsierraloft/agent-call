@@ -1,6 +1,78 @@
 import { test, expect } from "@playwright/test";
 import { installFixture } from "./fixture";
 
+test("AI input inspection separates call instructions, runtime tools, and Hermes", async ({
+  page,
+}) => {
+  await installFixture(page);
+  await page.goto("/personalities");
+  await page
+    .getByRole("button", { name: "Inspect AI Inputs", exact: true })
+    .click();
+  const inspector = page.getByRole("region", { name: "Call AI inputs" });
+  await expect(
+    inspector.getByText("google/gemini-3.1-flash-lite", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    inspector.getByText("Shared conversation instructions", { exact: false }),
+  ).toBeVisible();
+  await inspector.getByRole("tab", { name: "Model & Voice" }).click();
+  await expect(
+    inspector.getByText('"max_tokens": 512', { exact: false }),
+  ).toBeVisible();
+  await inspector.getByRole("tab", { name: "Runtime & Tools" }).click();
+  await inspector.getByText("finish_call", { exact: true }).click();
+  await expect(
+    inspector.getByText("Close the current conversation.", { exact: true }),
+  ).toBeVisible();
+  await inspector.getByRole("tab", { name: "Latest Request" }).click();
+  await expect(
+    inspector.getByText(/No request has been captured/),
+  ).toBeVisible();
+  await inspector.getByRole("button", { name: "Close Preview" }).click();
+  await page.getByRole("link", { name: "Hermes", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Hermes Integration", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/The guide here is read by Hermes/),
+  ).toBeVisible();
+  await page.getByRole("tab", { name: "MCP Tools" }).click();
+  await expect(
+    page.getByText("prepare_phone_call", { exact: true }),
+  ).toBeVisible();
+});
+
+test("practice shows captured model inputs without dialing", async ({
+  page,
+}) => {
+  const state = await installFixture(page);
+  await page.goto("/playground");
+  await page.getByRole("button", { name: "Text", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Start Text Practice", exact: true })
+    .click();
+  await page
+    .getByLabel("Practice message", { exact: true })
+    .fill("What did the model receive?");
+  await page
+    .getByRole("button", { name: "Send practice message", exact: true })
+    .click();
+  await expect(
+    page.getByText("What would you like to talk about?", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Inspect AI Inputs", exact: true })
+    .click();
+  const inspector = page.getByRole("region", { name: "Call AI inputs" });
+  await inspector.getByRole("tab", { name: "Latest Request" }).click();
+  await expect(inspector.locator("pre")).toContainText(
+    "What did the model receive?",
+  );
+  expect(state.started).toBe(0);
+  await page.getByRole("button", { name: "End Practice", exact: true }).click();
+});
+
 test("reading older calls is not reset by automatic refresh", async ({
   page,
 }) => {
@@ -163,7 +235,7 @@ test("integration saves calling guidance and shows the actual tool contract", as
     .fill("Ask only for missing facts. Return both files.");
   await page.getByRole("button", { name: "Save Changes", exact: true }).click();
   await expect.poll(() => state.records.guide.revision).toBe(2);
-  await page.getByRole("tab", { name: "Exposed Tools" }).click();
+  await page.getByRole("tab", { name: "MCP Tools" }).click();
   await page.getByText("get_calling_setup", { exact: true }).click();
   await expect(
     page.getByText("Read the current guide and available profiles."),

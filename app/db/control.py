@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import TYPE_CHECKING, Any
 
@@ -34,6 +35,9 @@ CREATE TABLE IF NOT EXISTS voice_measurements (
 CREATE TABLE IF NOT EXISTS control_activity (
     name TEXT PRIMARY KEY, observed_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS call_model_requests (
+    call_id TEXT PRIMARY KEY REFERENCES calls(call_id), request_json TEXT NOT NULL
+);
 """
 
 
@@ -46,6 +50,16 @@ def revision_record(row: Any) -> dict[str, Any] | None:
 
 
 class ControlMixin:
+    async def control_model_request(
+        self: DatabaseAccess, call_id: str, request: dict[str, Any]
+    ) -> None:
+        encoded = await asyncio.to_thread(json.dumps, request, ensure_ascii=False)
+        await self.execute(
+            "INSERT INTO call_model_requests VALUES (?,?) ON CONFLICT(call_id) "
+            "DO UPDATE SET request_json=excluded.request_json",
+            (call_id, encoded),
+        )
+
     async def control_seed(self: DatabaseAccess, entity: str, value: dict[str, Any]) -> None:
         await self.execute(
             "INSERT OR IGNORE INTO control_revisions VALUES (?,1,?,'initial deployment',?)",

@@ -13,6 +13,7 @@ import {
   FileText,
 } from "lucide-react";
 import { api, message } from "./api";
+import AIInputs from "./AIInputs";
 import {
   languages,
   sampleBrief,
@@ -23,6 +24,7 @@ import {
   type Status,
   type Language,
   type Intention,
+  type AIInputInspection,
 } from "./types";
 
 export default function Playground({
@@ -50,7 +52,7 @@ export default function Playground({
     [busy, setBusy] = useState(false),
     [text, setText] = useState(""),
     [partial, setPartial] = useState(""),
-    [preview, setPreview] = useState<string | null>(null);
+    [preview, setPreview] = useState<AIInputInspection | null>(null);
   const client = useRef<PipecatClient | null>(null),
     id = useRef<string | null>(null),
     alive = useRef(true),
@@ -248,16 +250,21 @@ export default function Playground({
     }
   }
   async function showPrompt() {
-    if (practice?.configuration.effective_prompt) {
-      setPreview(practice.configuration.effective_prompt);
-      return;
-    }
     try {
-      const r = await api<{ prompt: string }>("/prompt-preview", "POST", {
+      if (practice?.id) {
+        setPreview(
+          await api<AIInputInspection>(
+            "/practice/" + practice.id + "/ai-inputs",
+          ),
+        );
+        return;
+      }
+      const r = await api<AIInputInspection>("/prompt-preview", "POST", {
+        mode,
         context: { ...brief, max_duration_seconds: undefined },
         overrides: overrides(),
       });
-      setPreview(r.prompt);
+      setPreview(r);
     } catch (e) {
       setError(message(e));
     }
@@ -392,7 +399,7 @@ export default function Playground({
           )}
           <button onClick={showPrompt}>
             <FileText size={15} />
-            Preview Prompt
+            Inspect AI Inputs
           </button>
         </div>
         {blocked && (
@@ -445,13 +452,11 @@ export default function Playground({
           </p>
         )}
         {preview !== null && (
-          <div className="preview-panel">
-            <div className="row-top">
-              <h3>Effective prompt</h3>
-              <button onClick={() => setPreview(null)}>Close</button>
-            </div>
-            <pre>{preview}</pre>
-          </div>
+          <AIInputs
+            data={preview}
+            onClose={() => setPreview(null)}
+            onRefresh={showPrompt}
+          />
         )}
         <div className="practice-turns" aria-live="polite">
           {practice?.messages.map((turn, i) => (
