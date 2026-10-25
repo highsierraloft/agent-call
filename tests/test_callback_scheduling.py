@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -323,3 +324,110 @@ def test_clear_confirmation_variations(text):
 
     assert normalized_speech(text) in CONFIRMATIONS
     assert normalized_speech(text + " But change the time") not in CONFIRMATIONS
+
+
+@pytest.mark.parametrize("alternate", [False, True])
+async def test_inbound_callback_reuses_learned_identity_without_associating_another_number(
+    android, alternate
+):
+    from app.reception_models import ReviewCommit
+
+    h = android
+    row, body = await proposal(h)
+    db = h.service.db
+    source = await db.fetch_one("SELECT contact_id FROM call_contacts WHERE call_id='call_memory'")
+    cid = source["contact_id"]
+    # Match an actual new inbound caller: a nameless provisional contact and placeholder brief.
+    record = await db.get_plan_record("plan_call_memory")
+    packet = record.context.model_copy(
+        update={
+            "direction": "inbound",
+            "target": record.context.target.model_copy(update={"name": "Incoming caller"}),
+        }
+    )
+    await db.execute(
+        "UPDATE plans SET context_json=? WHERE plan_id='plan_call_memory'",
+        (json.dumps(packet.model_dump(mode="json")),),
+    )
+    await db.execute("UPDATE call_contacts SET direction='inbound' WHERE call_id='call_memory'")
+    await db.execute("UPDATE contacts SET name='',actor='call' WHERE contact_id=?", (cid,))
+    await db.reception_enqueue_review("call_memory")
+    job = await db.reception_claim_review()
+    await db.reception_read_review(job["job_id"], job["lease_token"], 0)
+    await h.service.control.contacts.commit_review(
+        ReviewCommit(
+            job_id=job["job_id"],
+            lease_token=job["lease_token"],
+            request_id="learned-name",
+            transcript_digest=job["transcript_digest"],
+            expected_memory_revision=0,
+            expected_summary_revision=0,
+            summary="Sam requested help with bookings.",
+            outcome="incomplete",
+            recipient_name="Sam",
+            identity_evidence_turn_ids=["turn0"],
+            memory_facts=[
+                {
+                    "key": "need",
+                    "text": "Runs a cafe and needs booking help",
+                    "evidence_turn_ids": ["turn1"],
+                }
+            ],
+        )
+    )
+    assert (await db.contact_get(cid))["name"] == "Sam"
+    if alternate:
+        body = body.model_copy(update={"destination": "+14155550188"})
+        h.service.config.allow_any_destination = True
+    row = await h.service.control.callbacks.propose("call_memory", body)
+    receipt = await h.service.control.callbacks.confirm(
+        "call_memory",
+        CallbackConfirmation(
+            proposal_id=row["proposal_id"],
+            proposal_revision=row["revision"],
+            readback_turn_id="owner",
+            confirmation_turn_id="owner",
+        ),
+        owner=True,
+    )
+    await make_due(h, receipt["schedule_id"])
+    await h.service.control.callbacks.tick()
+    runtime = h.service._runtime
+    assert runtime.packet.target.name == "Sam"
+    assert (
+        runtime.configuration["contact_memory"]["facts"][0]["text"]
+        == "Runs a cafe and needs booking help"
+    )
+    link = await db.fetch_one("SELECT * FROM call_contacts WHERE call_id=?", (runtime.call_id,))
+    assert link["contact_id"] == cid and link["recognition"] == "confirmed_callback_source"
+    assert len(await db.fetch_all("SELECT * FROM contacts")) == 1
+    if alternate:
+        assert await db.contact_lookup("+14155550188") == []
+    assert not h.asterisk.dials
+
+
+async def test_unresolved_callback_does_not_create_a_new_identity(android):
+    h = android
+    row, body = await proposal(h)
+    await h.service.db.execute(
+        "UPDATE call_contacts SET recognition='identity_mismatch' WHERE call_id='call_memory'"
+    )
+    receipt = await h.service.control.callbacks.confirm(
+        "call_memory",
+        CallbackConfirmation(
+            proposal_id=row["proposal_id"],
+            proposal_revision=1,
+            readback_turn_id="owner",
+            confirmation_turn_id="owner",
+        ),
+        owner=True,
+    )
+    await make_due(h, receipt["schedule_id"])
+    await h.service.control.callbacks.tick()
+    runtime = h.service._runtime
+    assert runtime.configuration["contact_memory"]["facts"] == []
+    link = await h.service.db.fetch_one(
+        "SELECT * FROM call_contacts WHERE call_id=?", (runtime.call_id,)
+    )
+    assert link["contact_id"] is None and link["recognition"] == "unresolved_callback"
+    assert len(await h.service.db.fetch_all("SELECT * FROM contacts")) == 1

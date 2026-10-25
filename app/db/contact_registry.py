@@ -211,6 +211,7 @@ class ContactRegistryMixin:
         channel_id: str | None = None,
         automatic_review: bool = True,
         frozen_memory: dict[str, Any] | None = None,
+        callback_source_call_id: str | None = None,
     ) -> dict[str, Any]:
         """Link once. Shared numbers remain ambiguous rather than merging people."""
         now = _iso_now()
@@ -219,6 +220,43 @@ class ContactRegistryMixin:
             existing = await cursor.fetchone()
             if existing:
                 return dict(existing)
+            if callback_source_call_id:
+                cursor = await conn.execute(
+                    "SELECT contact_id,recognition FROM call_contacts WHERE call_id=?",
+                    (callback_source_call_id,),
+                )
+                source = await cursor.fetchone()
+                memory = frozen_memory or {}
+                contact_id = memory.get("contact_id")
+                if (
+                    not source
+                    or source["contact_id"] != contact_id
+                    or source["recognition"]
+                    in {"shared", "identity_mismatch", "unresolved_callback"}
+                ):
+                    contact_id = None
+                state = "confirmed_callback_source" if contact_id else "unresolved_callback"
+                # A confirmed alternative destination belongs to this call, not a new identity association.
+                await conn.execute(
+                    "INSERT INTO call_contacts(call_id,contact_id,phone,direction,recognition,channel_id,memory_json,automatic_review,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                    (
+                        call_id,
+                        contact_id,
+                        phone,
+                        direction,
+                        state,
+                        channel_id,
+                        json.dumps(memory, ensure_ascii=False),
+                        int(automatic_review),
+                        now,
+                    ),
+                )
+                cursor = await conn.execute(
+                    "SELECT * FROM call_contacts WHERE call_id=?", (call_id,)
+                )
+                linked = await cursor.fetchone()
+                assert linked is not None
+                return dict(linked)
             matches = []
             if phone:
                 cursor = await conn.execute(

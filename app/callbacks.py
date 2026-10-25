@@ -166,7 +166,7 @@ class Callbacks:
             "window_start_utc": proposal.window_start.astimezone(UTC).isoformat(),
             "window_end_utc": proposal.window_end.astimezone(UTC).isoformat(),
             "source_brief": plan.context.model_dump(mode="json"),
-            "source_direction": (snapshot or {}).get("direction", "outbound"),
+            "source_direction": (snapshot or {}).get("direction", plan.context.direction),
             "source_business": (snapshot or {}).get("business"),
             "original_number": original,
             "alternate_number": proposal.destination != original,

@@ -250,7 +250,7 @@ class CallbackSchedulesMixin:
         self: DatabaseAccess, identifier: str, revision: int, plan_id: str
     ) -> bool:
         return await self._execute_cas(
-            "UPDATE callback_schedules SET plan_id=?,state='preparing',updated_at=? WHERE schedule_id=? AND revision=? "
+            "UPDATE callback_schedules SET plan_id=?,state='preparing',updated_at=?,contact_id=(SELECT contact_id FROM call_contacts WHERE call_id=callback_schedules.source_call_id) WHERE schedule_id=? AND revision=? "
             "AND state='scheduled' AND dial_claimed=0 AND plan_id IS NULL AND window_end>?",
             (plan_id, _iso_now(), identifier, revision, _iso_now()),
         )

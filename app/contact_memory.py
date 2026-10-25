@@ -148,6 +148,34 @@ class ContactMemory:
         assert contact is not None
         if name and contact["name"] and contact["name"].casefold() != name.casefold():
             return {**empty, "recognition": "different_recipient"}
+        return await self.snapshot_contact(contact["contact_id"], current=contact)
+
+    async def callback_snapshot(self, source_call_id: str) -> dict[str, Any]:
+        source = await self.db.fetch_one(
+            "SELECT contact_id,recognition FROM call_contacts WHERE call_id=?", (source_call_id,)
+        )
+        if (
+            not source
+            or not source["contact_id"]
+            or source["recognition"] in {"shared", "identity_mismatch", "unresolved_callback"}
+        ):
+            return {
+                "contact_id": None,
+                "revision": 0,
+                "facts": [],
+                "authenticated": False,
+                "recognition": "unresolved_callback",
+            }
+        snapshot = await self.snapshot_contact(source["contact_id"])
+        snapshot["recognition"] = "confirmed_callback_source"
+        return snapshot
+
+    async def snapshot_contact(
+        self, contact_id: str, *, current: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        contact = current if current is not None else await self.db.contact_get(contact_id)
+        if contact is None:
+            raise LookupError("Contact not found")
         # Bound what enters a live prompt independently of the size of the contact timeline.
         facts, used = [], 0
         source_ids = {
@@ -177,7 +205,7 @@ class ContactMemory:
             facts.append(fact)
             used += len(fact["text"])
         return {
-            **empty,
+            "authenticated": False,
             "contact_id": contact["contact_id"],
             "recognition": "exact",
             "name": contact["name"],

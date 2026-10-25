@@ -492,6 +492,10 @@ The dispatcher creates a fresh plan near the due time. It rechecks policy, suppr
 phone readiness, deployment state, and capacity. The final database transaction claims both the existing
 one-shot dial and the schedule. A restart or uncertain response recovers the same call; it never creates
 an automatic replacement. A busy line waits only within the confirmed window, then becomes missed work.
+The execution plan uses the source call's resolved contact and current eligible memory. It replaces an
+inbound placeholder name with a learned name. The callback links to that source contact without adding
+its alternate destination to the contact's number associations. Unresolved identities get no memory or
+automatic new contact. Prepared snapshots retain their original context if the owner later edits a contact.
 Cancellation before the dial claim prevents initiation. Afterward, use End Call for an underway attempt.
 Reschedule, Cancel, Call Now, and resolving required information require owner instructions.
 

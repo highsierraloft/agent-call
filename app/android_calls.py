@@ -164,6 +164,24 @@ class AndroidCallService:
         )
         snapshot["callback_policy"] = (await self.control.current("callback_policy"))["value"]
         if callback_schedule:
+            snapshot["callback_source_call_id"] = callback_schedule["source_call_id"]
+            snapshot["contact_memory"] = await self.control.contacts.callback_snapshot(
+                callback_schedule["source_call_id"]
+            )
+            target = request.context.target
+            memory = snapshot["contact_memory"]
+            if memory.get("name"):
+                target = target.model_copy(
+                    update={
+                        "name": memory["name"],
+                        "background": memory.get("background") or target.background,
+                    }
+                )
+            elif callback_schedule["value"].get("source_direction") == "inbound":
+                target = target.model_copy(update={"name": "Callback recipient"})
+            request = request.model_copy(
+                update={"context": request.context.model_copy(update={"target": target})}
+            )
             snapshot["callback_schedule_id"] = callback_schedule["schedule_id"]
             snapshot["callback_schedule_revision"] = callback_schedule["revision"]
             if callback_schedule["value"].get("source_business"):
@@ -239,6 +257,7 @@ class AndroidCallService:
                 name=approved.context.target.name,
                 direction="outbound",
                 frozen_memory=(configuration or {}).get("contact_memory"),
+                callback_source_call_id=(configuration or {}).get("callback_source_call_id"),
             )
             runtime.writer = self._spawn(self._write_transcript(runtime))
             self._spawn(self._setup(runtime))
