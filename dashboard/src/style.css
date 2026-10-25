@@ -57,6 +57,7 @@
     --control-border: #8a8a91;
     --selected: #e8eff9;
     --shadow: 0 24px 80px #0002;
+    --control-height: 2.85714rem;
     color-scheme: light dark;
   }
   * {
@@ -349,7 +350,7 @@
   .detail-pane {
     min-width: 0;
     overflow: auto;
-    padding: 28px 32px 48px;
+    padding: 24px 24px 40px;
   }
   .editor-layout {
     display: grid;
@@ -365,7 +366,8 @@
   }
   .configuration-editor {
     min-width: 0;
-    padding: 0 28px 40px;
+    max-width: 1000px;
+    padding: 0 24px 40px;
     overflow: auto;
   }
   .playground-layout {
@@ -382,23 +384,23 @@
   .practice-conversation {
     display: flex;
     flex-direction: column;
-    padding: 28px 36px;
+    padding: 24px;
     min-width: 0;
     min-height: 0;
   }
   .integration-page {
     overflow: auto;
     flex: 1;
-    padding: 30px;
+    padding: 24px;
   }
   .integration-page .configuration-editor {
     padding: 28px 0;
     overflow: visible;
-    max-width: 920px;
+    max-width: none;
   }
   .integration-content {
     padding: 28px 0;
-    max-width: 920px;
+    max-width: none;
   }
   .section-container {
     display: flex;
@@ -432,7 +434,8 @@
   .search-field svg {
     position: absolute;
     left: 10px;
-    top: 11px;
+    top: 50%;
+    transform: translateY(-50%);
     color: var(--muted);
   }
   .search-field input {
@@ -819,6 +822,20 @@
     min-width: 0;
     width: 100%;
   }
+  .temperature-field {
+    position: relative;
+  }
+  .temperature-field > .check {
+    position: absolute;
+    top: 0;
+    right: 0;
+    margin: 0;
+    min-height: 21px;
+    font-size: 0.8571rem;
+  }
+  .temperature-field > label:not(.check) {
+    padding-top: 0;
+  }
   .voice-fields h4 {
     margin: 24px 0 12px;
   }
@@ -1042,6 +1059,12 @@
   .settings-panel {
     padding-top: 24px;
   }
+  .field-help {
+    font-size: 0.8571rem;
+    color: var(--muted);
+    margin: -8px 0 18px;
+    max-width: 70ch;
+  }
   .section-intro {
     margin: 0 0 20px;
     max-width: 65ch;
@@ -1098,14 +1121,15 @@
   }
   .catalog-footer {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-end;
     align-items: center;
     flex-wrap: wrap;
     gap: 8px;
-    margin-top: 24px;
-    border-top: 1px solid var(--line);
-    padding-top: 12px;
+    margin-top: 8px;
     font-size: 0.8571rem;
+  }
+  .catalog-footer > [role="status"] {
+    margin-right: auto;
   }
   .action-menu {
     position: relative;
@@ -1238,7 +1262,7 @@
     flex-shrink: 0;
   }
   .integration-page {
-    max-width: 1180px;
+    max-width: 1048px;
     width: 100%;
   }
   .integration-page .editor-topbar {
@@ -1251,7 +1275,7 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    margin-bottom: 28px;
+    margin-block: 16px 24px;
     color: var(--muted);
     font-size: 0.8571rem;
     flex-wrap: wrap;
@@ -1655,11 +1679,30 @@
     flex: 1;
     min-width: 0;
     overflow: auto;
-    padding: 28px;
+    padding: 24px;
   }
-  .workflow-page > * {
+  .workflow-content {
     max-width: 1000px;
-    margin-inline: auto;
+    min-width: 0;
+  }
+  .workflow-toolbar {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .workflow-toolbar > label {
+    margin: 0;
+  }
+  .workflow-toolbar > label > input,
+  .workflow-toolbar > label > select {
+    height: var(--control-height);
+    padding-block: 8px;
+  }
+  .callbacks-workspace > .settings-panel {
+    padding: 0;
   }
   .workflow-page h2 {
     margin: 0 0 6px;
@@ -1675,12 +1718,14 @@
     margin: 4px 0 16px;
   }
   .workflow-filter {
-    max-width: 1000px;
+    width: min(100%, 280px);
+    min-width: 0;
+    margin: 0;
   }
   .workflow-filter select {
     max-width: 320px;
   }
-  .followup-list {
+  .followup-list:not(:empty) {
     border-top: 1px solid var(--line);
   }
   .followup-row {
@@ -1725,6 +1770,24 @@
   .outcome-panel .section-heading {
     flex-wrap: wrap;
   }
+  .outcome-panel > .section-heading:not(:first-child) {
+    margin-top: 24px;
+  }
+  .call-summary {
+    margin-bottom: 24px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--line);
+  }
+  .call-summary .section-heading {
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .call-snapshot > button {
+    margin-bottom: 16px;
+  }
+  .call-snapshot > section {
+    margin-bottom: 24px;
+  }
   .cost-breakdown {
     margin-bottom: 28px;
   }
@@ -1743,8 +1806,26 @@
     vertical-align: top;
   }
   .cost-total {
-    font-size: 1.2857rem;
-    margin-block: 24px 8px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 12px;
+    font-size: 1rem;
+    margin: 0;
+  }
+  .cost-total strong {
+    font-size: 1.4286rem;
+  }
+  .cost-coverage {
+    font-size: 0.8571rem;
+    margin: 6px 0 0;
+  }
+  .cost-toolbar {
+    align-items: center;
+  }
+  .cost-summary {
+    min-width: 0;
+    flex: 1 1 260px;
   }
   .cost-calls {
     margin-block: 16px;
@@ -1826,6 +1907,22 @@
   }
 }
 @layer responsive {
+  @media (pointer: coarse) {
+    :root {
+      --control-height: 3.14286rem;
+    }
+    .contact-form input,
+    .contact-form textarea,
+    .workflow-page input,
+    .workflow-page select,
+    .workflow-page textarea {
+      font-size: 1.14286rem;
+    }
+    .workflow-toolbar > label > input,
+    .workflow-toolbar > label > select {
+      min-height: 44px;
+    }
+  }
   @media (max-width: 40.625em) {
     .calls-workspace > .section-tabs {
       padding-inline: 20px;
@@ -1869,47 +1966,20 @@
     overflow-y: auto;
     flex: 1;
   }
-  .contacts-layout {
-    display: grid;
-    grid-template-columns: 290px minmax(0, 1fr);
-    flex: 1;
-    min-height: 0;
-  }
-  .contact-list {
-    min-width: 0;
-    overflow-y: auto;
-    border-right: 1px solid var(--line);
-  }
-  .contact-list > .section-heading {
-    padding: 16px;
-    gap: 8px;
-  }
-  .contact-detail {
-    min-width: 0;
-    overflow-y: auto;
-  }
-  .contact-heading {
-    padding: 28px 28px 8px;
-  }
-  .contact-history,
-  .contact-form {
-    padding: 24px 28px;
-    max-width: 850px;
-  }
   .revision-form {
     max-width: 1000px;
   }
 }
 @layer components {
-  .nav-group h2 {
-    margin: 0 10px 5px;
-    font-size: 0.857rem;
-    line-height: 1.5;
-    font-weight: 600;
-    color: var(--muted);
+  .revision-form > .editor-heading {
+    margin-bottom: 20px;
+    align-items: center;
   }
-  .nav-group a {
-    min-height: 44px;
+  .configuration-editor .form-section {
+    max-width: none;
+  }
+  .settings-workspace > .revision-form {
+    padding-top: 24px;
   }
   .mobile-back {
     display: none;
@@ -1918,7 +1988,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: 8px 20px;
-    padding: 18px 28px;
+    padding: 18px 24px;
     border-bottom: 1px solid var(--line);
   }
   .toggle-row {
@@ -1942,58 +2012,23 @@
     gap: 4px 18px;
     border: 0;
     padding: 0;
+    margin: 0 0 18px;
+  }
+  .day-picker legend {
+    margin-bottom: 8px;
   }
   .day-picker label {
     display: flex;
+    flex-direction: row;
     align-items: center;
     gap: 8px;
     min-height: 44px;
+    margin: 0;
   }
   .form-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 20px;
-  }
-  .contact-rows {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-  .contact-rows a {
-    display: flex;
-    flex-direction: column;
-    padding: 16px 22px;
-    border-bottom: 1px solid var(--line);
-    text-decoration: none;
-    color: var(--text);
-    overflow-wrap: anywhere;
-  }
-  .contact-rows a.selected,
-  .contact-rows a:hover {
-    background: var(--selected);
-  }
-  .contact-rows span,
-  .contact-rows small {
-    color: var(--muted);
-  }
-  .contact-history .timeline-call {
-    padding: 20px 0;
-    border-bottom: 1px solid var(--line);
-  }
-  .contact-history .section-heading {
-    align-items: flex-start;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-  .contact-history time {
-    color: var(--muted);
-    font-size: 0.93rem;
-  }
-  .contact-history p {
-    white-space: pre-wrap;
-    font-size: 1.143rem;
-    line-height: 1.6;
-    max-width: 70ch;
   }
   .memory-fact {
     display: grid;
@@ -2007,6 +2042,9 @@
   }
   .memory-fact button {
     min-height: 44px;
+  }
+  .memory-fact > label {
+    margin: 0;
   }
   .schedule-row {
     padding: 24px 0;
@@ -2036,28 +2074,10 @@
 }
 @layer responsive {
   @media (max-width: 40.625em) {
-    .contacts-layout {
-      display: block;
-      overflow-y: auto;
-    }
-    .contact-list {
-      border-right: 0;
-    }
-    .contacts-layout.has-selection .contact-list {
-      display: none;
-    }
-    .contacts-layout:not(.has-selection) .contact-detail {
-      display: none;
-    }
     .mobile-back {
       display: inline-flex;
       margin: 16px 16px 0;
       min-height: 44px;
-    }
-    .contact-heading,
-    .contact-history,
-    .contact-form {
-      padding: 18px;
     }
     .form-grid {
       grid-template-columns: 1fr;
@@ -2087,7 +2107,7 @@
 }
 @layer components {
   .handset-check {
-    margin: 20px 28px;
+    margin: 20px 24px;
     border-bottom: 1px solid var(--line);
     padding-bottom: 16px;
     max-width: 940px;

@@ -274,7 +274,7 @@ export default function VoiceFields({
                       : "Extra reasoning can increase the pause before replies."}
                 </small>
               </label>
-              <div>
+              <div className="temperature-field">
                 <label className="check">
                   <input
                     type="checkbox"
@@ -291,7 +291,7 @@ export default function VoiceFields({
                       )
                     }
                   />
-                  Apply temperature
+                  Apply
                 </label>
                 <label>
                   Temperature
@@ -661,11 +661,11 @@ export default function VoiceFields({
         </div>
       )}
       <div className="catalog-footer">
-        <span className="muted" role={loading ? "status" : undefined}>
-          {loading
-            ? "Loading provider choices…"
-            : "Choices from your connected providers."}
-        </span>
+        {loading && (
+          <span className="muted" role="status">
+            Loading provider choices…
+          </span>
+        )}
         <button
           className="quiet-button"
           type="button"

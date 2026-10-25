@@ -362,9 +362,6 @@ export function ConfigurationEditor({
                 {record.revision ? "Version " + record.revision : "New"}
               </span>
             </div>
-            {entity === "guide" && (
-              <p className="caption muted">Instructions for Hermes</p>
-            )}
           </div>
           <div className="editor-save">
             {dirty && <span className="change-label">Unsaved changes</span>}

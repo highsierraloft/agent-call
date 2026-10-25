@@ -89,8 +89,7 @@ export default function VoicePreview({
             : "Stop Sample"}
       </button>
       <p className="muted caption">
-        Free provider sample. Its text is chosen by Inworld; it does not
-        demonstrate your task, personality, or Speech Expression setting.
+        Free provider sample; task, personality, and expression aren’t applied.
       </p>
       {state === "loading" && <p role="status">Loading sample…</p>}
       {error && (

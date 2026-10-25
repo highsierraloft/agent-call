@@ -91,136 +91,136 @@ export default function Callbacks({
         {tab === "manual" ? (
           <Followups session={session} navigate={navigate} onNew={onNew} />
         ) : (
-          <section className="workflow-page">
-            <header className="section-heading">
-              <div>
-                <h2>Scheduled callbacks</h2>
+          <section className="workflow-page" aria-label="Scheduled callbacks">
+            <div className="workflow-content">
+              {error && (
+                <p className="error" role="alert">
+                  {error}
+                </p>
+              )}
+              <div className="workflow-toolbar">
+                <label className="workflow-filter">
+                  Status
+                  <select
+                    aria-label="Filter status"
+                    value={filter}
+                    onChange={(e) => setFilter(e.target.value)}
+                  >
+                    {[
+                      "open",
+                      "all",
+                      "needs_information",
+                      "missed",
+                      "cancelled",
+                      "attempted",
+                      "uncertain",
+                    ].map((v) => (
+                      <option key={v} value={v}>
+                        {(v[0].toUpperCase() + v.slice(1)).replaceAll("_", " ")}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button onClick={() => setEditing("new")}>
+                  Schedule Callback
+                </button>
               </div>
-              <button onClick={() => setEditing("new")}>
-                Schedule Callback
-              </button>
-            </header>
-            {error && (
-              <p className="error" role="alert">
-                {error}
-              </p>
-            )}
-            <label className="workflow-filter">
-              Show
-              <select
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-              >
-                {[
-                  "open",
-                  "all",
-                  "needs_information",
-                  "missed",
-                  "cancelled",
-                  "attempted",
-                  "uncertain",
-                ].map((v) => (
-                  <option key={v} value={v}>
-                    {(v[0].toUpperCase() + v.slice(1)).replaceAll("_", " ")}
-                  </option>
+              {editing && (
+                <ScheduleEditor
+                  key={
+                    typeof editing === "string" ? editing : editing.schedule_id
+                  }
+                  row={editing === "new" ? undefined : editing}
+                  onClose={() => setEditing(null)}
+                  onSaved={() => {
+                    setEditing(null);
+                    void load();
+                  }}
+                />
+              )}
+              {!rows.length && !editing && (
+                <p className="empty-state">
+                  {busy ? "Loading callbacks…" : "No callbacks"}
+                </p>
+              )}
+              <div className="schedule-list">
+                {rows.map((row) => (
+                  <article className="schedule-row" key={row.schedule_id}>
+                    <div className="section-heading">
+                      <strong>{row.value.objective}</strong>
+                      <span className="status-label">
+                        {row.state.replaceAll("_", " ")}
+                      </span>
+                    </div>
+                    <p>
+                      {row.destination}
+                      {row.value.alternate_number
+                        ? " · Confirmed alternate number"
+                        : ""}
+                    </p>
+                    <p>
+                      {date(row.window_start, session.timezone)} –{" "}
+                      {date(row.window_end, session.timezone)}{" "}
+                      <span className="muted">{session.timezone}</span>
+                    </p>
+                    {row.reason && <p className="muted">{row.reason}</p>}
+                    {row.value.needed_information?.length ? (
+                      <RequiredInformation
+                        row={row}
+                        onSaved={() => void load()}
+                      />
+                    ) : null}
+                    <div className="save-row">
+                      <button
+                        onClick={() =>
+                          navigate(
+                            "/calls/" + (row.call_id || row.source_call_id),
+                          )
+                        }
+                      >
+                        {row.call_id ? "Open Attempt" : "Source Conversation"}
+                      </button>
+                      {!row.dial_claimed &&
+                        ![
+                          "cancelled",
+                          "attempted",
+                          "completed",
+                          "uncertain",
+                        ].includes(row.state) && (
+                          <>
+                            <button
+                              disabled={busy}
+                              onClick={() => setEditing(row)}
+                            >
+                              Reschedule
+                            </button>
+                            <button
+                              disabled={
+                                busy ||
+                                Boolean(row.value.needed_information?.length)
+                              }
+                              onClick={() => action(row, "call_now")}
+                            >
+                              Call Now
+                            </button>
+                            <button
+                              disabled={busy}
+                              onClick={() => action(row, "cancel")}
+                            >
+                              Cancel Callback
+                            </button>
+                          </>
+                        )}
+                    </div>
+                  </article>
                 ))}
-              </select>
-            </label>
-            {editing && (
-              <ScheduleEditor
-                key={
-                  typeof editing === "string" ? editing : editing.schedule_id
-                }
-                row={editing === "new" ? undefined : editing}
-                onClose={() => setEditing(null)}
-                onSaved={() => {
-                  setEditing(null);
-                  void load();
-                }}
-              />
-            )}
-            {!rows.length && (
-              <p className="empty-state">
-                {busy ? "Loading callbacks…" : "No callbacks"}
-              </p>
-            )}
-            <div className="schedule-list">
-              {rows.map((row) => (
-                <article className="schedule-row" key={row.schedule_id}>
-                  <div className="section-heading">
-                    <strong>{row.value.objective}</strong>
-                    <span className="status-label">
-                      {row.state.replaceAll("_", " ")}
-                    </span>
-                  </div>
-                  <p>
-                    {row.destination}
-                    {row.value.alternate_number
-                      ? " · Confirmed alternate number"
-                      : ""}
-                  </p>
-                  <p>
-                    {date(row.window_start, session.timezone)} –{" "}
-                    {date(row.window_end, session.timezone)}{" "}
-                    <span className="muted">{session.timezone}</span>
-                  </p>
-                  {row.reason && <p className="muted">{row.reason}</p>}
-                  {row.value.needed_information?.length ? (
-                    <RequiredInformation
-                      row={row}
-                      onSaved={() => void load()}
-                    />
-                  ) : null}
-                  <div className="save-row">
-                    <button
-                      onClick={() =>
-                        navigate(
-                          "/calls/" + (row.call_id || row.source_call_id),
-                        )
-                      }
-                    >
-                      {row.call_id ? "Open Attempt" : "Source Conversation"}
-                    </button>
-                    {!row.dial_claimed &&
-                      ![
-                        "cancelled",
-                        "attempted",
-                        "completed",
-                        "uncertain",
-                      ].includes(row.state) && (
-                        <>
-                          <button
-                            disabled={busy}
-                            onClick={() => setEditing(row)}
-                          >
-                            Reschedule
-                          </button>
-                          <button
-                            disabled={
-                              busy ||
-                              Boolean(row.value.needed_information?.length)
-                            }
-                            onClick={() => action(row, "call_now")}
-                          >
-                            Call Now
-                          </button>
-                          <button
-                            disabled={busy}
-                            onClick={() => action(row, "cancel")}
-                          >
-                            Cancel Callback
-                          </button>
-                        </>
-                      )}
-                  </div>
-                </article>
-              ))}
+              </div>
+              {offset !== null && (
+                <button disabled={busy} onClick={() => load(true)}>
+                  Load More Callbacks
+                </button>
+              )}
             </div>
-            {offset !== null && (
-              <button disabled={busy} onClick={() => load(true)}>
-                Load More Callbacks
-              </button>
-            )}
           </section>
         )}
       </SectionTabs>

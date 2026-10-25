@@ -56,6 +56,10 @@ rows open the original call, transcript, and recording. Their action menu contai
 Missing summaries add no placeholder paragraph; actual summaries and review status remain visible.
 Dates use the workspace timezone. Empty views use a single padded state label.
 Callbacks separates Scheduled from Follow-ups.
+Contact search and creation controls share a height and baseline. Forms own their outer padding;
+the shared field-group style does not reset it. Costs and callback views use one bounded content
+column, with filters and actions in a compact toolbar. Costs keeps unknown usage explicit without
+repeating scope disclaimers or a second call-list heading.
 
 Settings separates Business, Voice & Models, and Memory; Outbound separates Instructions from
 Automatic Callbacks. Inbound intake limits and additional callback rules use labelled disclosures.
@@ -81,6 +85,8 @@ active calls retain their stored settings snapshots. Contact and memory saves al
 call snapshots unchanged. Restoration creates another revision.
 Concurrent saves use the expected revision and return a conflict instead of overwriting another edit.
 Configuration fields pause editing while a save is in progress, so its response cannot overwrite a later edit.
+Changing the configuration entity mounts a separate editor. Outbound instructions cannot be rendered
+as callback-policy fields while the new record loads.
 Built-in profile IDs remain available for older clients; custom profiles can be archived.
 
 `ContextPacket.profile_id` is optional. `get_calling_setup` supplies the current calling guide,

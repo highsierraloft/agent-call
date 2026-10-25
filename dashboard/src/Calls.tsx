@@ -566,7 +566,7 @@ function CallDetail({
             <span>
               {!terminal(detail.state)
                 ? "The recording will be available after the call."
-                : `Recording ${detail.artifacts.audio_status}. The transcript remains available below.`}
+                : `Recording ${detail.artifacts.audio_status}`}
             </span>
           </div>
         )}
@@ -657,12 +657,36 @@ function CallDetail({
         )}
         {tab === "outcome" && (
           <section className="reading call-summary">
-            <h3>Conversation summary</h3>
+            <div className="section-heading">
+              <h3>Conversation summary</h3>
+              {!["pending", "leased"].includes(detail.review?.state || "") &&
+                terminal(detail.state) && (
+                  <button
+                    onClick={async () => {
+                      try {
+                        await api(
+                          "/calls/" + detail.call_id + "/review",
+                          "POST",
+                        );
+                        setDetail((old) =>
+                          old ? { ...old, review: { state: "pending" } } : old,
+                        );
+                      } catch (e) {
+                        setError(message(e));
+                      }
+                    }}
+                  >
+                    {detail.review
+                      ? "Review Again with Hermes"
+                      : "Review with Hermes"}
+                  </button>
+                )}
+            </div>
             <p>
               {detail.summary?.value.text ||
                 (detail.review?.state === "pending" ||
                 detail.review?.state === "leased"
-                  ? "Hermes review pending. The full transcript is already available."
+                  ? "Hermes review pending."
                   : "No summary recorded.")}
             </p>
             {detail.contact?.contact_id && (
@@ -670,25 +694,6 @@ function CallDetail({
                 Open Contact Memory & History
               </a>
             )}
-            {!["pending", "leased"].includes(detail.review?.state || "") &&
-              terminal(detail.state) && (
-                <button
-                  onClick={async () => {
-                    try {
-                      await api("/calls/" + detail.call_id + "/review", "POST");
-                      setDetail((old) =>
-                        old ? { ...old, review: { state: "pending" } } : old,
-                      );
-                    } catch (e) {
-                      setError(message(e));
-                    }
-                  }}
-                >
-                  {detail.review
-                    ? "Review Again with Hermes"
-                    : "Review with Hermes"}
-                </button>
-              )}
             {terminal(detail.state) && detail.contact && (
               <ContactAssociation
                 detail={detail}
@@ -771,7 +776,7 @@ function CallDetail({
             initialOpen
           >
             {detail.configuration ? (
-              <div className="reading">
+              <div className="reading call-snapshot">
                 <CostBreakdown cost={detail.cost} />
                 <h3>{detail.configuration.profile_name}</h3>
                 <p className="muted">
@@ -872,8 +877,6 @@ function CallDetail({
         )}
         {tab === "notes" && (
           <div className="reading">
-            <h3>Your review</h3>
-            <p className="muted">Notes never change the original transcript.</p>
             <label>
               Notes
               <textarea

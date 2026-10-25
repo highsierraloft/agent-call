@@ -342,7 +342,6 @@ export default function Playground({
   return (
     <div className="playground-layout">
       <aside className="practice-setup">
-        <h2>Practice</h2>
         {draft && (
           <div className="draft-notice">
             <strong>Testing unsaved changes</strong>
@@ -395,8 +394,7 @@ export default function Playground({
             </select>
           </label>
           <p className="field-help">
-            Practice can read selected memory. It never changes real contacts,
-            memory, or callback schedules.
+            Contacts, memory, and callbacks stay unchanged.
           </p>
           <div className="segmented" role="group" aria-label="Practice mode">
             <button

@@ -3,19 +3,27 @@ import { api, ApiError, message } from "./api";
 import type { Revision } from "./types";
 import { ActionMenu } from "./Controls";
 
-export default function RevisionForm<T extends object>({
-  entity,
-  title,
-  children,
-  onSaved,
-  onDirtyChange,
-}: {
+type RevisionFormProps<T extends object> = {
   entity: string;
   title: string;
   children: (value: T, change: (value: T) => void) => ReactNode;
   onSaved?: () => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
-}) {
+};
+
+export default function RevisionForm<T extends object>(
+  props: RevisionFormProps<T>,
+) {
+  return <RevisionEditor key={props.entity} {...props} />;
+}
+
+function RevisionEditor<T extends object>({
+  entity,
+  title,
+  children,
+  onSaved,
+  onDirtyChange,
+}: RevisionFormProps<T>) {
   const [record, setRecord] = useState<Revision<T>>(),
     [value, setValue] = useState<T>();
   const [error, setError] = useState(""),

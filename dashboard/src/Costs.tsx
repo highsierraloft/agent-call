@@ -15,10 +15,7 @@ export function CostBreakdown({ cost }: { cost?: ProviderCost }) {
     return (
       <section>
         <h3>Provider cost</h3>
-        <p className="muted">
-          Usage was not recorded for this call. Historical costs are not
-          reconstructed.
-        </p>
+        <p className="muted">Usage not recorded.</p>
       </section>
     );
   if (cost.coverage === "pending")
@@ -162,171 +159,183 @@ export default function Costs({
     }
   }
   return (
-    <section className="workflow-page" aria-label="Call costs">
-      <div className="section-heading">
-        <div>
-          <h2>Recorded usage</h2>
-        </div>
-        <label>
-          Month
-          <input
-            type="month"
-            value={month}
-            onChange={(e) => e.target.value && setMonth(e.target.value)}
-          />
-        </label>
-      </div>
-      {error && (
-        <p role="alert" className="error">
-          {error}
-        </p>
-      )}
-      {busy && !data && <p role="status">Loading costs…</p>}
-      {data && (
-        <>
-          <p className="cost-total">
-            {data.call_count ? (
+    <section className="workflow-page costs-page" aria-label="Call costs">
+      <div className="workflow-content">
+        <div className="workflow-toolbar cost-toolbar">
+          <div className="cost-summary">
+            {data && (
               <>
-                Estimate from available usage:{" "}
-                <strong>
-                  {data.coverage.complete + data.coverage.partial
-                    ? money(data.known_subtotal_usd)
-                    : "Not recorded"}
-                </strong>
+                <p className="cost-total">
+                  <span>Estimated provider cost</span>
+                  <strong>
+                    {data.call_count
+                      ? data.coverage.complete + data.coverage.partial
+                        ? money(data.known_subtotal_usd)
+                        : "Not recorded"
+                      : money(0)}
+                  </strong>
+                </p>
+                <p className="muted cost-coverage">
+                  {data.call_count
+                    ? [
+                        data.coverage.complete &&
+                          `${data.coverage.complete} complete`,
+                        data.coverage.partial &&
+                          `${data.coverage.partial} partial`,
+                        data.coverage.unavailable &&
+                          `${data.coverage.unavailable} without usage`,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")
+                    : "No calls"}
+                </p>
               </>
-            ) : (
-              "No calls in this month."
             )}
+            {busy && !data && <p role="status">Loading costs…</p>}
+          </div>
+          <label>
+            Month
+            <input
+              type="month"
+              value={month}
+              onChange={(e) => e.target.value && setMonth(e.target.value)}
+            />
+          </label>
+        </div>
+        {error && (
+          <p role="alert" className="error">
+            {error}
           </p>
-          <p className="muted">
-            {data.coverage.complete} complete · {data.coverage.partial} partial
-            · {data.coverage.unavailable} without recorded usage. Missing usage
-            is not zero.
-          </p>
-          <p className="caption muted">{data.scope}</p>
-          {!!data.providers.length && (
-            <table className="provider-totals">
-              <thead>
-                <tr>
-                  <th>Provider</th>
-                  <th>Subtotal from available usage</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.providers.map((p) => (
-                  <tr key={p.provider}>
-                    <td>{p.provider}</td>
-                    <td>{money(p.usd)}</td>
+        )}
+        {data && (
+          <>
+            {!!data.providers.length && (
+              <table className="provider-totals">
+                <thead>
+                  <tr>
+                    <th>Provider</th>
+                    <th>Estimate</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          {!!data.calls.length && (
-            <>
-              <h3>Calls this month</h3>
-              <div className="cost-calls">
-                {data.calls.map((c) => (
-                  <button
-                    className="cost-call"
-                    key={c.call_id}
-                    onClick={() => navigate("/calls/" + c.call_id)}
-                  >
-                    <span>
-                      <strong>{c.target}</strong>
-                      <small>{date(c.created_at, session.timezone)}</small>
-                    </span>
-                    <span>
-                      {money(c.cost.total_usd ?? c.cost.known_subtotal_usd)}
-                      <small>
-                        {c.cost.coverage === "complete"
-                          ? "Estimated"
-                          : c.cost.coverage === "partial"
-                            ? "Partial estimate"
-                            : "Usage not recorded"}
-                      </small>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-          {data.next_offset !== null && (
-            <button onClick={more} disabled={busy}>
-              Load More Costs
-            </button>
-          )}
-        </>
-      )}
-      <SettingsDisclosure
-        title="Pricing assumptions"
-        summary="Changes apply to future call preparations"
-      >
-        <p className="muted">
-          OpenRouter uses reported usage cost where available, then catalog
-          rates. Soniox’s hourly equivalent is approximate because it bills
-          tokens. Inworld uses submitted characters, including interrupted
-          speech. Set speech rates to match your plan.
-        </p>
-        <p className="caption">
-          <a href="https://soniox.com/pricing" target="_blank" rel="noreferrer">
-            Soniox pricing
-          </a>{" "}
-          ·{" "}
-          <a href="https://inworld.ai/pricing" target="_blank" rel="noreferrer">
-            Inworld pricing
-          </a>
-        </p>
-        {draft && (
-          <form onSubmit={save}>
-            {(
-              [
-                ["soniox_usd_per_hour", "Soniox · USD per streaming hour"],
+                </thead>
+                <tbody>
+                  {data.providers.map((p) => (
+                    <tr key={p.provider}>
+                      <td>{p.provider}</td>
+                      <td>{money(p.usd)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {!!data.calls.length && (
+              <>
+                <div className="cost-calls">
+                  {data.calls.map((c) => (
+                    <button
+                      className="cost-call"
+                      key={c.call_id}
+                      onClick={() => navigate("/calls/" + c.call_id)}
+                    >
+                      <span>
+                        <strong>{c.target}</strong>
+                        <small>{date(c.created_at, session.timezone)}</small>
+                      </span>
+                      <span>
+                        {money(c.cost.total_usd ?? c.cost.known_subtotal_usd)}
+                        {c.cost.coverage === "partial" && (
+                          <small>Partial estimate</small>
+                        )}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+            {data.next_offset !== null && (
+              <button onClick={more} disabled={busy}>
+                Load More Costs
+              </button>
+            )}
+          </>
+        )}
+        <SettingsDisclosure
+          title="Pricing assumptions"
+          summary="Changes apply to future call preparations"
+        >
+          <p className="muted">
+            OpenRouter uses reported usage cost where available, then catalog
+            rates. Soniox’s hourly equivalent is approximate because it bills
+            tokens. Inworld uses submitted characters, including interrupted
+            speech. Set speech rates to match your plan.
+          </p>
+          <p className="caption">
+            <a
+              href="https://soniox.com/pricing"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Soniox pricing
+            </a>{" "}
+            ·{" "}
+            <a
+              href="https://inworld.ai/pricing"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Inworld pricing
+            </a>
+          </p>
+          {draft && (
+            <form onSubmit={save}>
+              {(
                 [
-                  "inworld_tts2_usd_per_million_characters",
-                  "Inworld TTS-2 · USD per million characters",
-                ],
-                [
-                  "inworld_flash_usd_per_million_characters",
-                  "Inworld Flash · USD per million characters",
-                ],
-              ] as const
-            ).map(([key, label]) => (
-              <label key={key}>
-                {label}
-                <input
-                  required
-                  type="number"
-                  min="0"
-                  max="10000"
-                  step="any"
-                  value={Number.isFinite(draft[key]) ? draft[key] : ""}
-                  onChange={(e) => {
-                    setSaved(false);
-                    setDraft({ ...draft, [key]: e.target.valueAsNumber });
-                  }}
+                  ["soniox_usd_per_hour", "Soniox · USD per streaming hour"],
+                  [
+                    "inworld_tts2_usd_per_million_characters",
+                    "Inworld TTS-2 · USD per million characters",
+                  ],
+                  [
+                    "inworld_flash_usd_per_million_characters",
+                    "Inworld Flash · USD per million characters",
+                  ],
+                ] as const
+              ).map(([key, label]) => (
+                <label key={key}>
+                  {label}
+                  <input
+                    required
+                    type="number"
+                    min="0"
+                    max="10000"
+                    step="any"
+                    value={Number.isFinite(draft[key]) ? draft[key] : ""}
+                    onChange={(e) => {
+                      setSaved(false);
+                      setDraft({ ...draft, [key]: e.target.valueAsNumber });
+                    }}
+                  />
+                </label>
+              ))}
+              <label>
+                Pricing note
+                <textarea
+                  rows={3}
+                  value={draft.note}
+                  onChange={(e) => setDraft({ ...draft, note: e.target.value })}
                 />
               </label>
-            ))}
-            <label>
-              Pricing note
-              <textarea
-                rows={3}
-                value={draft.note}
-                onChange={(e) => setDraft({ ...draft, note: e.target.value })}
-              />
-            </label>
-            <button type="submit" disabled={busy}>
-              {busy ? "Saving…" : "Save Pricing"}
-            </button>
-            {saved && (
-              <p role="status">
-                Pricing saved. Earlier estimates keep their captured rates.
-              </p>
-            )}
-          </form>
-        )}
-      </SettingsDisclosure>
+              <button type="submit" disabled={busy}>
+                {busy ? "Saving…" : "Save Pricing"}
+              </button>
+              {saved && (
+                <p role="status">
+                  Pricing saved. Earlier estimates keep their captured rates.
+                </p>
+              )}
+            </form>
+          )}
+        </SettingsDisclosure>
+      </div>
     </section>
   );
 }

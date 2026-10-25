@@ -946,11 +946,12 @@ test("costs distinguish missing usage and changing rates preserves earlier estim
 }, info) => {
   const state = await installFixture(page);
   await page.goto("/calls/costs");
+  await expect(page.locator(".cost-total")).toContainText("$0.0274");
   await expect(
-    page.getByText("Estimate from available usage:", { exact: false }),
-  ).toContainText("$0.0274");
-  await expect(
-    page.getByText("Usage not recorded", { exact: true }),
+    page
+      .locator(".cost-call")
+      .filter({ hasText: "Bookshop" })
+      .getByText("Not recorded", { exact: true }),
   ).toBeVisible();
   await page.getByText("Pricing assumptions", { exact: true }).click();
   await page
@@ -959,9 +960,7 @@ test("costs distinguish missing usage and changing rates preserves earlier estim
   await page.getByRole("button", { name: "Save Pricing", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("Pricing saved");
   expect(state.records.pricing.value.soniox_usd_per_hour).toBe(0.2);
-  await expect(
-    page.getByText("Estimate from available usage:", { exact: false }),
-  ).toContainText("$0.0274");
+  await expect(page.locator(".cost-total")).toContainText("$0.0274");
   await page.screenshot({
     path: info.outputPath("costs.png"),
     fullPage: true,

@@ -100,8 +100,6 @@ export default function Integration({
           id="integration-panel-tools"
           aria-labelledby="integration-tab-tools"
         >
-          <h3>Available tools</h3>
-          <p className="muted">Enabled tools are selected in Hermes.</p>
           {data?.tools.map((tool) => (
             <details className="tool-row" key={tool.name}>
               <summary>

@@ -70,112 +70,114 @@ export default function Followups({
   }
   return (
     <section className="workflow-page" aria-label="Callback work">
-      <div className="section-heading">
-        <div>
-          <h2>Follow-ups</h2>
+      <div className="workflow-content">
+        <div className="workflow-toolbar">
+          <label className="workflow-filter">
+            Status
+            <select
+              aria-label="Filter status"
+              value={filter}
+              onChange={(e) => {
+                setSelected(null);
+                setFilter(e.target.value);
+              }}
+            >
+              <option value="open">Open follow-ups</option>
+              <option value="all">All follow-ups</option>
+              {Object.entries(followupStates).map(([v, label]) => (
+                <option key={v} value={v}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button onClick={() => load()} disabled={loading}>
+            Refresh
+          </button>
         </div>
-        <button onClick={() => load()} disabled={loading}>
-          Refresh
-        </button>
-      </div>
-      <label className="workflow-filter">
-        Show
-        <select
-          value={filter}
-          onChange={(e) => {
-            setSelected(null);
-            setFilter(e.target.value);
-          }}
-        >
-          <option value="open">Open follow-ups</option>
-          <option value="all">All follow-ups</option>
-          {Object.entries(followupStates).map(([v, label]) => (
-            <option key={v} value={v}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </label>
-      {error && (
-        <p role="alert" className="error">
-          {error}
-        </p>
-      )}
-      {loading && !rows.length && <p role="status">Loading follow-ups…</p>}
-      {!loading && !rows.length && (
-        <div className="empty-state">No follow-ups</div>
-      )}
-      <div className="followup-list">
-        {rows.map((row) => (
-          <article key={row.followup_id} className="followup-row">
-            <div className="section-heading">
-              <div>
-                <h3>{row.target.name}</h3>
-                <span className="muted">
-                  {followupStates[row.status]} ·{" "}
-                  {row.value.window_start
-                    ? date(row.value.window_start, session.timezone)
-                    : "No agreed time"}
-                </span>
-              </div>
-              <button
-                onClick={() =>
-                  setSelected(
-                    selected === row.followup_id ? null : row.followup_id,
-                  )
-                }
-                aria-expanded={selected === row.followup_id}
-              >
-                {selected === row.followup_id ? "Close Details" : "Review"}
-              </button>
-            </div>
-            <p className="preserve">{row.value.objective}</p>
-            {!!row.value.needed_information.length && (
-              <p className="muted">
-                Needed: {row.value.needed_information.join("; ")}
-              </p>
-            )}
-            {row.recipient_opted_out && (
-              <p className="error">
-                This recipient requested no further calls.
-              </p>
-            )}
-            <div className="save-row">
-              <button onClick={() => navigate("/calls/" + row.source_call_id)}>
-                Original Call
-              </button>
-              {row.status === "ready" && (
+        {error && (
+          <p role="alert" className="error">
+            {error}
+          </p>
+        )}
+        {loading && !rows.length && <p role="status">Loading follow-ups…</p>}
+        {!loading && !rows.length && (
+          <div className="empty-state">No follow-ups</div>
+        )}
+        <div className="followup-list">
+          {rows.map((row) => (
+            <article key={row.followup_id} className="followup-row">
+              <div className="section-heading">
+                <div>
+                  <h3>{row.target.name}</h3>
+                  <span className="muted">
+                    {followupStates[row.status]} ·{" "}
+                    {row.value.window_start
+                      ? date(row.value.window_start, session.timezone)
+                      : "No agreed time"}
+                  </span>
+                </div>
                 <button
-                  className="primary"
-                  disabled={row.recipient_opted_out}
-                  onClick={() => prepare(row)}
+                  onClick={() =>
+                    setSelected(
+                      selected === row.followup_id ? null : row.followup_id,
+                    )
+                  }
+                  aria-expanded={selected === row.followup_id}
                 >
-                  Prepare Callback
+                  {selected === row.followup_id ? "Close Details" : "Review"}
                 </button>
+              </div>
+              <p className="preserve">{row.value.objective}</p>
+              {!!row.value.needed_information.length && (
+                <p className="muted">
+                  Needed: {row.value.needed_information.join("; ")}
+                </p>
               )}
-            </div>
-            {selected === row.followup_id && (
-              <FollowupEditor
-                key={row.followup_id + ":" + row.revision}
-                row={row}
-                onSaved={(updated) =>
-                  setRows((old) =>
-                    old.map((v) =>
-                      v.followup_id === updated.followup_id ? updated : v,
-                    ),
-                  )
-                }
-                navigate={navigate}
-              />
-            )}
-          </article>
-        ))}
+              {row.recipient_opted_out && (
+                <p className="error">
+                  This recipient requested no further calls.
+                </p>
+              )}
+              <div className="save-row">
+                <button
+                  onClick={() => navigate("/calls/" + row.source_call_id)}
+                >
+                  Original Call
+                </button>
+                {row.status === "ready" && (
+                  <button
+                    className="primary"
+                    disabled={row.recipient_opted_out}
+                    onClick={() => prepare(row)}
+                  >
+                    Prepare Callback
+                  </button>
+                )}
+              </div>
+              {selected === row.followup_id && (
+                <FollowupEditor
+                  key={row.followup_id + ":" + row.revision}
+                  row={row}
+                  onSaved={(updated) =>
+                    setRows((old) =>
+                      old.map((v) =>
+                        v.followup_id === updated.followup_id ? updated : v,
+                      ),
+                    )
+                  }
+                  navigate={navigate}
+                />
+              )}
+            </article>
+          ))}
+        </div>
+        {offset !== null && (
+          <button onClick={() => load(true)} disabled={loading}>
+            Load More Follow-ups
+          </button>
+        )}
       </div>
-      {offset !== null && (
-        <button onClick={() => load(true)} disabled={loading}>
-          Load More Follow-ups
-        </button>
-      )}
     </section>
   );
 }

@@ -75,7 +75,7 @@ export default function Contacts({
   return (
     <div className={"contacts-layout " + (selected ? "has-selection" : "")}>
       <aside className="contact-list" aria-label="Contact list">
-        <div className="section-heading">
+        <div className="contact-search">
           <label className="search-field">
             <Search size={16} />
             <input
@@ -449,7 +449,7 @@ function ContactDetail({
               )}
             </div>
           ) : section === "memory" ? (
-            <div className="form-section contact-form">
+            <div className="contact-form">
               {!facts.length && (
                 <div className="empty-state">No saved memory</div>
               )}
@@ -524,7 +524,7 @@ function ContactDetail({
               </div>
             </div>
           ) : (
-            <div className="form-section contact-form">
+            <div className="contact-form">
               <label>
                 Name
                 <input value={name} onChange={(e) => setName(e.target.value)} />
@@ -537,7 +537,6 @@ function ContactDetail({
                   onChange={(e) => setBackground(e.target.value)}
                 />
               </label>
-              <p className="field-help">Used as conversation context.</p>
               <label>
                 Phone numbers
                 <textarea

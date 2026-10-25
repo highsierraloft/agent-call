@@ -173,10 +173,6 @@ export default function OutcomePanel({
           {editing ? "Cancel Editing" : record ? "Edit Outcome" : "Add Outcome"}
         </button>
       </div>
-      <p className="muted">
-        Assessed by you or Hermes from the conversation. The original transcript
-        stays unchanged.
-      </p>
       {error && (
         <p role="alert" className="error">
           {error}
@@ -355,10 +351,7 @@ export default function OutcomePanel({
           )}
         </>
       ) : (
-        <p>
-          No outcome recorded yet. Hermes can save one after it reads the
-          complete transcript.
-        </p>
+        <p className="muted">No outcome recorded.</p>
       )}
       <div className="section-heading">
         <h3>Follow-ups</h3>
@@ -379,7 +372,7 @@ export default function OutcomePanel({
           ))}
         </ul>
       ) : (
-        <p className="muted">No callbacks are recorded for this call.</p>
+        <p className="muted">No follow-ups</p>
       )}
     </section>
   );
