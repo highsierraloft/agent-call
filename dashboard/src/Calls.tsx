@@ -12,6 +12,9 @@ import {
 } from "lucide-react";
 import { api, message } from "./api";
 import AIInputs from "./AIInputs";
+import OutcomePanel from "./OutcomePanel";
+import { CostBreakdown } from "./Costs";
+import { date, outcomes } from "./workflow";
 import { tabKeys } from "./a11y";
 import { SettingsDisclosure } from "./Controls";
 import {
@@ -24,25 +27,7 @@ import {
   type AIInputInspection,
 } from "./types";
 
-export function date(
-  value: string | null | undefined,
-  zone: string,
-  short = false,
-) {
-  if (!value) return "—";
-  return new Intl.DateTimeFormat("en-GB", {
-    timeZone: zone,
-    ...(short
-      ? { day: "numeric", month: "short" }
-      : {
-          day: "numeric",
-          month: "short",
-          year: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-  }).format(new Date(value));
-}
+export { date } from "./workflow";
 const stateLabel = (state: string) =>
   state.replaceAll("_", " ").replace(/^./, (v) => v.toUpperCase());
 export default function Calls({
@@ -59,6 +44,7 @@ export default function Calls({
   const [calls, setCalls] = useState<Call[]>([]),
     [q, setQ] = useState(""),
     [state, setState] = useState(""),
+    [outcomeFilter, setOutcomeFilter] = useState(""),
     [language, setLanguage] = useState(""),
     [profile, setProfile] = useState(""),
     [start, setStart] = useState(""),
@@ -71,10 +57,18 @@ export default function Calls({
   const paginated = useRef(false),
     pageRequest = useRef(false),
     filterKey = useRef("");
-  filterKey.current = JSON.stringify([q, state, language, profile, start, end]);
+  filterKey.current = JSON.stringify([
+    q,
+    state,
+    outcomeFilter,
+    language,
+    profile,
+    start,
+    end,
+  ]);
   useEffect(() => {
     paginated.current = false;
-  }, [q, state, language, profile, start, end]);
+  }, [q, state, outcomeFilter, language, profile, start, end]);
   useEffect(() => {
     const controller = new AbortController();
     const timer = setTimeout(
@@ -83,6 +77,7 @@ export default function Calls({
         const params = new URLSearchParams({
           q,
           state,
+          outcome: outcomeFilter,
           language,
           profile,
           start,
@@ -112,7 +107,7 @@ export default function Calls({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [q, state, language, profile, start, end, refresh]);
+  }, [q, state, outcomeFilter, language, profile, start, end, refresh]);
   useEffect(() => {
     const timer = setInterval(() => {
       if (!paginated.current && !pageRequest.current) setRefresh((v) => v + 1);
@@ -130,6 +125,7 @@ export default function Calls({
           new URLSearchParams({
             q,
             state,
+            outcome: outcomeFilter,
             language,
             profile,
             start,
@@ -167,9 +163,10 @@ export default function Calls({
           <details className="compact-details">
             <summary>
               Filters
-              {[state, language, profile, start, end].filter(Boolean).length >
-                0 &&
-                ` · ${[state, language, profile, start, end].filter(Boolean).length} active`}
+              {[state, outcomeFilter, language, profile, start, end].filter(
+                Boolean,
+              ).length > 0 &&
+                ` · ${[state, outcomeFilter, language, profile, start, end].filter(Boolean).length} active`}
             </summary>
             <div className="filter-row">
               <select
@@ -215,6 +212,21 @@ export default function Calls({
               </button>
             </div>
 
+            <label>
+              Task outcome
+              <select
+                value={outcomeFilter}
+                onChange={(e) => setOutcomeFilter(e.target.value)}
+              >
+                <option value="">All outcomes</option>
+                <option value="not_recorded">Not recorded</option>
+                {Object.entries(outcomes).map(([v, label]) => (
+                  <option key={v} value={v}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label>
               Personality
               <select
@@ -275,6 +287,16 @@ export default function Calls({
               </span>
               <span className="row-number">{call.target.phone}</span>
               <span className="row-objective">{call.objective}</span>
+              {(call.outcome_status || !!call.pending_followups) && (
+                <span className="caption muted">
+                  {call.outcome_status
+                    ? outcomes[call.outcome_status]
+                    : "Outcome not recorded"}
+                  {call.pending_followups
+                    ? ` · ${call.pending_followups} open follow-up(s)`
+                    : ""}
+                </span>
+              )}
               <span className="row-footer">
                 <span
                   className={
@@ -322,6 +344,7 @@ export default function Calls({
           session={session}
           onBack={() => navigate("/calls")}
           onReuse={onNew}
+          onFollowups={() => navigate("/calls/followups")}
         />
       ) : (
         <section className="empty call-welcome">
@@ -348,11 +371,13 @@ function CallDetail({
   session,
   onBack,
   onReuse,
+  onFollowups,
 }: {
   id: string;
   session: Session;
   onBack: () => void;
   onReuse: (brief: Brief) => void;
+  onFollowups: () => void;
 }) {
   const [detail, setDetail] = useState<Detail | null>(null),
     [error, setError] = useState(""),
@@ -408,7 +433,7 @@ function CallDetail({
             ).values(),
           ],
         }));
-        done = terminal(result.state);
+        done = terminal(result.state) && result.cost?.coverage !== "pending";
         if (!initialized.current) {
           setNote(result.annotation.note);
           setTags(result.annotation.tags.join(", "));
@@ -544,7 +569,7 @@ function CallDetail({
           aria-label="Call details"
           onKeyDown={tabKeys}
         >
-          {["transcript", "brief", "notes", "details"].map((t) => (
+          {["transcript", "outcome", "brief", "notes", "details"].map((t) => (
             <button
               key={t}
               role="tab"
@@ -623,6 +648,23 @@ function CallDetail({
             )}
           </>
         )}
+        {tab === "outcome" &&
+          (terminal(detail.state) ? (
+            <OutcomePanel
+              detail={detail}
+              onFollowups={onFollowups}
+              onEvidence={() => setTab("transcript")}
+              onUpdated={(assessment, followups) =>
+                setDetail((old) =>
+                  old ? { ...old, assessment, followups } : old,
+                )
+              }
+            />
+          ) : (
+            <p className="muted">
+              The outcome can be assessed after the call ends.
+            </p>
+          ))}
         {tab === "brief" && (
           <div className="reading">
             <h3>Approved brief</h3>
@@ -679,6 +721,7 @@ function CallDetail({
           >
             {detail.configuration ? (
               <div className="reading">
+                <CostBreakdown cost={detail.cost} />
                 <h3>{detail.configuration.profile_name}</h3>
                 <p className="muted">
                   Personality v{detail.configuration.profile_revision} · Global

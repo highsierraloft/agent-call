@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { api, message, setCsrf } from "./api";
 import type { Brief, Draft, Session, Status } from "./types";
-import Calls from "./Calls";
+import Calls from "./CallsWorkspace";
 import Profiles from "./Profiles";
 const Playground = lazy(() => import("./Playground"));
 import Integration from "./Integration";
@@ -30,6 +30,7 @@ export default function App() {
   const [error, setError] = useState(""),
     [newCall, setNewCall] = useState(false),
     [reuse, setReuse] = useState<Brief>(),
+    [followupId, setFollowupId] = useState<string>(),
     [draft, setDraft] = useState<Draft>();
   const [ending, setEnding] = useState(false);
   useEffect(() => {
@@ -90,8 +91,9 @@ export default function App() {
   }, [session]);
   const section =
     sections.find((s) => path.split("/")[1] === s.id) || sections[0];
-  const openCall = (brief?: Brief) => {
+  const openCall = (brief?: Brief, callbackId?: string) => {
     setReuse(brief);
+    setFollowupId(callbackId);
     setNewCall(true);
   };
   const testDraft = (value: Draft) => {
@@ -173,9 +175,11 @@ export default function App() {
                   ? "Call in progress"
                   : status?.practice_active
                     ? "Practice active"
-                    : status?.ready
-                      ? "Phone ready"
-                      : "Phone unavailable"
+                    : status?.check_active
+                      ? "Configuration check active"
+                      : status?.ready
+                        ? "Phone ready"
+                        : "Phone unavailable"
               }
               title={
                 status?.phone.phase?.replaceAll("_", " ") ||
@@ -188,11 +192,13 @@ export default function App() {
                   ? "Call in progress"
                   : status?.practice_active
                     ? "Practice active"
-                    : status?.ready
-                      ? "Phone ready"
-                      : status
-                        ? "Phone unavailable"
-                        : "Checking phone"}
+                    : status?.check_active
+                      ? "Configuration check active"
+                      : status?.ready
+                        ? "Phone ready"
+                        : status
+                          ? "Phone unavailable"
+                          : "Checking phone"}
               </span>
             </span>
             {status?.active_call && (
@@ -204,7 +210,11 @@ export default function App() {
             <button
               className={section.id === "calls" ? "primary" : ""}
               onClick={() => openCall()}
-              disabled={!!status?.active_call || !!status?.practice_active}
+              disabled={
+                !!status?.active_call ||
+                !!status?.practice_active ||
+                !!status?.check_active
+              }
             >
               <Plus size={16} />
               New Call
@@ -281,6 +291,7 @@ export default function App() {
         <NewCall
           session={session}
           initial={reuse}
+          followupId={followupId}
           onClose={() => setNewCall(false)}
           onStarted={(id) => {
             setNewCall(false);

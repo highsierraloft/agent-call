@@ -66,6 +66,7 @@ from app.inworld_client import InworldVoiceTTSService as InworldTTSService
 from app.models import ContextPacket
 from app.openrouter_client import OpenRouterVoiceLLMService
 from app.openrouter_tts import OPENROUTER_API_URL, OpenRouterTTSService
+from app.provider_usage import UsageLedger
 from app.soniox_client import SonioxVoiceSTTService as SonioxSTTService
 from app.spoken_identity import SpeakerIdentityFilter
 from app.voice_prompts import voice_instructions
@@ -170,6 +171,7 @@ class AndroidVoiceSession:
         pipecat_logger.disable("pipecat")
         pipecat_logger.disable("pipecat_asterisk")
         self.callbacks = callbacks
+        self.usage = UsageLedger(stt=config.stt_transport, tts=config.tts_transport)
         self.ready = asyncio.Event()
         self.connected = asyncio.Event()
         self.closing = ClosingWindow()
@@ -226,6 +228,7 @@ class AndroidVoiceSession:
         elif config.stt_transport == "soniox":
             semantic = config.soniox_turn_detection == "semantic"
             stt = SonioxSTTService(
+                usage=self.usage,
                 api_key=config.soniox_key().get_secret_value(),
                 sample_rate=input_sample_rate,
                 vad_force_turn_endpoint=not semantic,
@@ -273,6 +276,7 @@ class AndroidVoiceSession:
             )
         options = model_options(config)
         llm = OpenRouterVoiceLLMService(
+            usage=self.usage,
             api_key=api_key,
             http_client=self._llm_http,
             settings=OpenRouterVoiceLLMService.Settings(
@@ -290,6 +294,7 @@ class AndroidVoiceSession:
         tts: TTSService
         if config.tts_transport == "inworld":
             tts = InworldTTSService(
+                usage=self.usage,
                 api_key=config.inworld_key().get_secret_value(),
                 sample_rate=8000,
                 encoding="PCM",
@@ -383,6 +388,7 @@ class AndroidVoiceSession:
         llm.register_function("finish_call", self._finish_call, cancel_on_interruption=True)
 
         async def pipeline_error(_worker: Any, frame: ErrorFrame) -> None:
+            self.usage.incomplete = True
             logger.error(
                 "voice_error %s",
                 json.dumps(
@@ -590,3 +596,5 @@ class AndroidVoiceSession:
                 await asyncio.gather(self._wrapup_task, return_exceptions=True)
             await self._stt_http.aclose()
             await self._llm_http.aclose()
+            self.usage.stop_stt()
+            self.usage.finalized = True

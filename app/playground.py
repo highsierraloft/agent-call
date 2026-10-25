@@ -67,7 +67,11 @@ class Playground:
     ) -> dict[str, Any]:
         service = self.control.service
         async with service._operations:
-            if self.active or await self.control.db.list_nonterminal_calls():
+            if (
+                self.active
+                or self.control.checks.active
+                or await self.control.db.list_nonterminal_calls()
+            ):
                 raise ValueError(
                     "A call or practice session is already active. End it before starting another."
                 )

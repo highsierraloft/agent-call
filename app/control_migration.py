@@ -33,3 +33,14 @@ async def migrate_contract(db: Database) -> None:
                     (profile["entity"], {**profile["value"], "prompt": prompt}, profile["revision"])
                 )
     await db.control_migrate(changes)
+
+
+async def migrate_workflow_guide(db: Database) -> None:
+    guide = await db.control_current("guide")
+    if guide and guide["value"]["text"] == control_legacy.WORKFLOW_PREVIOUS_GUIDE:
+        await db.control_save(
+            "guide",
+            {"text": DEFAULT_CALLING_GUIDE},
+            guide["revision"],
+            "call workflow guide migration",
+        )

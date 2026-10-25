@@ -139,6 +139,7 @@ class ContextPacket(BaseModel):
 
 class PreparePhoneCallInput(BaseModel):
     context: ContextPacket
+    followup_id: str | None = Field(default=None, pattern=r"^followup_[a-zA-Z0-9_-]{1,80}$")
     authority_basis: str | None = Field(default=None, max_length=1000)
     requested_by_owner: bool = False
 

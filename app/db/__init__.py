@@ -13,6 +13,7 @@ from app.db.termination import TerminationMixin
 from app.db.transcripts import TranscriptsMixin
 from app.db.transfers import TRANSFER_ELIGIBLE_STATES, TransfersMixin
 from app.db.webhooks import WebhooksMixin
+from app.db.workflows import WorkflowMixin
 
 __all__ = [
     "DEPLOYMENT_LOCK_TTL",
@@ -29,6 +30,7 @@ __all__ = [
 class Database(
     PlansMixin,
     ControlMixin,
+    WorkflowMixin,
     DeploymentMixin,
     CallsMixin,
     ContactsMixin,

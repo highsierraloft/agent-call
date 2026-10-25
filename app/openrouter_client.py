@@ -3,17 +3,40 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from contextvars import ContextVar
 from typing import Any
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, AsyncStream
+from openai.types.chat import ChatCompletionChunk
+from openai.types.completion_usage import CompletionUsage
 from pipecat.frames.frames import Frame, LLMFullResponseStartFrame, LLMTextFrame
+from pipecat.metrics.metrics import LLMTokenUsage
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openrouter.llm import OpenRouterLLMService
+
+from app.provider_usage import UsageLedger
 
 
 class OpenRouterVoiceLLMService(OpenRouterLLMService):
     generated_response_text = ""
     response_serial = 0
+
+    def __init__(self, *, usage: UsageLedger | None = None, **kwargs: Any) -> None:
+        self.usage = usage
+        self._usage_request: ContextVar[int | None] = ContextVar("usage_request", default=None)
+        super().__init__(**kwargs)
+
+    async def get_chat_completions(self, context: LLMContext) -> AsyncStream[ChatCompletionChunk]:
+        if self.usage:
+            self._usage_request.set(self.usage.start_llm())
+        return await super().get_chat_completions(context)
+
+    def _token_usage(self, usage: CompletionUsage) -> LLMTokenUsage:
+        request_id = self._usage_request.get()
+        if self.usage and request_id is not None:
+            self.usage.record_llm(request_id, usage.model_dump())
+        return super()._token_usage(usage)
 
     async def push_frame(
         self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM

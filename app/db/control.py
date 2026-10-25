@@ -7,6 +7,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from app.db.engine import _iso_now
+from app.provider_usage import estimate_cost
 
 if TYPE_CHECKING:
     from app.db.protocols import DatabaseAccess
@@ -35,6 +36,12 @@ CREATE TABLE IF NOT EXISTS voice_measurements (
 CREATE TABLE IF NOT EXISTS control_activity (
     name TEXT PRIMARY KEY, observed_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS configuration_checks (
+ check_id TEXT PRIMARY KEY, state TEXT NOT NULL, configuration_json TEXT NOT NULL, result_json TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS call_provider_usage (
+ call_id TEXT PRIMARY KEY REFERENCES calls(call_id), usage_json TEXT NOT NULL, pricing_json TEXT, estimate_json TEXT NOT NULL, recorded_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS call_model_requests (
     call_id TEXT PRIMARY KEY REFERENCES calls(call_id), request_json TEXT NOT NULL
 );
@@ -50,6 +57,20 @@ def revision_record(row: Any) -> dict[str, Any] | None:
 
 
 class ControlMixin:
+    async def control_usage(
+        self: DatabaseAccess, call_id: str, usage: dict[str, Any], pricing: dict[str, Any] | None
+    ) -> None:
+        await self.execute(
+            "INSERT INTO call_provider_usage VALUES (?,?,?,?,?) ON CONFLICT(call_id) DO UPDATE SET usage_json=excluded.usage_json,pricing_json=excluded.pricing_json,estimate_json=excluded.estimate_json,recorded_at=excluded.recorded_at",
+            (
+                call_id,
+                json.dumps(usage),
+                json.dumps(pricing) if pricing else None,
+                json.dumps(estimate_cost(usage, pricing)),
+                _iso_now(),
+            ),
+        )
+
     async def control_model_request(
         self: DatabaseAccess, call_id: str, request: dict[str, Any]
     ) -> None:

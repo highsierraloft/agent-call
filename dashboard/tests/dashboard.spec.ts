@@ -219,7 +219,9 @@ test("new calls require review and start only on the Call action", async ({
   await page.getByRole("button", { name: "New Call", exact: true }).click();
   await page.getByLabel("Recipient", { exact: true }).fill("Casey");
   await page.getByLabel("Phone number").fill("+1 202 555 0111");
-  await page.getByLabel("Task").fill("Invite Casey to play chess.");
+  await page
+    .getByRole("textbox", { name: "Task", exact: true })
+    .fill("Invite Casey to play chess.");
   await page.getByRole("button", { name: "Review Call", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Review Call" }),
@@ -821,4 +823,186 @@ test("starting microphone practice stops a provider sample before asking permiss
   await expect(
     page.getByRole("button", { name: "Play Sample", exact: true }),
   ).toBeVisible();
+});
+
+test("outcomes keep evidence separate and callbacks become reviewable work", async ({
+  page,
+}, info) => {
+  const state = await installFixture(page);
+  await page.goto("/calls/call_demo_1");
+  await page.getByRole("tab", { name: "Outcome", exact: true }).click();
+  await page.getByRole("button", { name: "Add Outcome", exact: true }).click();
+  await page
+    .getByRole("combobox", { name: "Outcome", exact: true })
+    .selectOption("incomplete");
+  await page
+    .getByRole("textbox", { name: "What happened?", exact: true })
+    .fill("We need the owner’s approved price before calling back.");
+  await page.getByLabel("Confirmed facts").fill("Saturday afternoon works.");
+  await page.getByText("Supporting transcript lines", { exact: true }).click();
+  await page.locator(".evidence-picker input").nth(1).check();
+  await page.getByLabel("Add a callback", { exact: true }).check();
+  await page
+    .getByLabel("Callback task", { exact: true })
+    .fill("Call back with the approved price.");
+  await page.getByLabel("Information needed first").fill("Approved price");
+  await page.getByRole("button", { name: "Save Outcome", exact: true }).click();
+  await expect(page.getByText(/Your assessment/)).toBeVisible();
+  expect(
+    state.assessments.call_demo_1.value.facts[0].evidence_turn_ids,
+  ).toEqual(["turn_2"]);
+  expect(state.followups).toHaveLength(1);
+  expect(state.started).toBe(0);
+  await page.getByRole("button", { name: "Manage Follow-ups" }).click();
+  await page.getByRole("button", { name: "Review", exact: true }).click();
+  await page
+    .getByRole("textbox", { name: "Information still needed", exact: true })
+    .fill("");
+  await page
+    .getByLabel("Facts for the callback")
+    .fill("The owner approved twenty euros.");
+  await page
+    .getByRole("combobox", { name: "Status", exact: true })
+    .selectOption("ready");
+  await page
+    .getByRole("button", { name: "Save Follow-up", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Prepare Callback", exact: true })
+    .click();
+  await expect(page.getByLabel("Phone number", { exact: true })).toHaveValue(
+    "+12025550110",
+  );
+  await page.getByRole("button", { name: "Review Call", exact: true }).click();
+  expect(state.prepareRequest.followup_id).toBe(state.followups[0].followup_id);
+  expect(state.prepareRequest.context.relevant_facts).toContain(
+    "The owner approved twenty euros.",
+  );
+  expect(state.started).toBe(0);
+  await page.getByRole("button", { name: "Close call form" }).click();
+  await page.screenshot({
+    path: info.outputPath("followups.png"),
+    fullPage: true,
+    animations: "disabled",
+  });
+});
+
+test("outcome conflicts preserve the owner draft", async ({ page }) => {
+  const state = await installFixture(page);
+  await page.goto("/calls/call_demo_1");
+  await page.getByRole("tab", { name: "Outcome", exact: true }).click();
+  await page.getByRole("button", { name: "Add Outcome" }).click();
+  await page
+    .getByRole("textbox", { name: "What happened?", exact: true })
+    .fill("My unsaved review.");
+  state.assessments.call_demo_1 = {
+    call_id: "call_demo_1",
+    revision: 1,
+    actor: "hermes",
+    updated_at: new Date().toISOString(),
+    value: {
+      status: "achieved",
+      explanation: "Another saved assessment.",
+      facts: [],
+      evidence_turn_ids: ["turn_2"],
+    },
+  };
+  await page.getByRole("button", { name: "Save Outcome", exact: true }).click();
+  await expect(
+    page.getByRole("textbox", { name: "What happened?", exact: true }),
+  ).toHaveValue("My unsaved review.");
+  await page
+    .getByRole("button", { name: "Load Saved Outcome", exact: true })
+    .click();
+  await expect(
+    page.getByRole("textbox", { name: "What happened?", exact: true }),
+  ).toHaveValue("Another saved assessment.");
+});
+
+test("costs distinguish missing usage and changing rates preserves earlier estimates", async ({
+  page,
+}, info) => {
+  const state = await installFixture(page);
+  await page.goto("/calls/costs");
+  await expect(
+    page.getByText("Estimate from available usage:", { exact: false }),
+  ).toContainText("$0.0274");
+  await expect(
+    page.getByText("Usage not recorded", { exact: true }),
+  ).toBeVisible();
+  await page.getByText("Pricing assumptions", { exact: true }).click();
+  await page
+    .getByLabel("Soniox · USD per streaming hour", { exact: true })
+    .fill("0.2");
+  await page.getByRole("button", { name: "Save Pricing", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Pricing saved");
+  expect(state.records.pricing.value.soniox_usd_per_hour).toBe(0.2);
+  await expect(
+    page.getByText("Estimate from available usage:", { exact: false }),
+  ).toContainText("$0.0274");
+  await page.screenshot({
+    path: info.outputPath("costs.png"),
+    fullPage: true,
+    animations: "disabled",
+  });
+});
+
+test("configuration check uses temporary settings, reports failures, and never dials", async ({
+  page,
+}, info) => {
+  const state = await installFixture(page);
+  state.checkFails = true;
+  await page.goto("/playground");
+  await page.getByText("Voice and model choices", { exact: true }).click();
+  await page
+    .getByRole("combobox", { name: "OpenRouter model", exact: true })
+    .selectOption("openai/gpt-6-luna");
+  await page
+    .getByRole("button", { name: "Check Configuration", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Check failed", exact: true }),
+  ).toBeVisible();
+  expect(state.checkRequest.overrides.voice.dialogue_model).toBe(
+    "openai/gpt-6-luna",
+  );
+  expect(state.started).toBe(0);
+  expect(state.practiceStarts).toBe(0);
+  await page.getByText("Missing facts and callbacks", { exact: true }).click();
+  await expect(
+    page.getByText("The response invented a price.", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Voice quality and telephone delay need a listening test.", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: info.outputPath("configuration-check.png"),
+    fullPage: true,
+    animations: "disabled",
+  });
+});
+
+test("stopping a configuration check restores the practice controls", async ({
+  page,
+}) => {
+  const state = await installFixture(page);
+  state.checkAutoFinish = false;
+  await page.goto("/playground");
+  await page
+    .getByRole("button", { name: "Check Configuration", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Start Voice Practice", exact: true }),
+  ).toBeDisabled();
+  await page
+    .getByRole("region", { name: "Configuration testing", exact: true })
+    .getByRole("button", { name: "Stop Check", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Start Voice Practice", exact: true }),
+  ).toBeEnabled();
+  expect(state.check.state).toBe("cancelled");
+  expect(state.started).toBe(0);
 });

@@ -15,6 +15,11 @@ import {
 import { api, message } from "./api";
 import AIInputs from "./AIInputs";
 import VoiceFields from "./VoiceFields";
+import {
+  CheckLauncher,
+  CheckResults,
+  useConfigurationCheck,
+} from "./ConfigurationCheck";
 import BriefFields from "./BriefFields";
 import { stopVoicePreview } from "./VoicePreview";
 import { SectionTabs, ActionMenu, SettingsDisclosure } from "./Controls";
@@ -147,8 +152,15 @@ export default function Playground({
     };
     return Object.keys(value).length ? value : undefined;
   };
+  const check = useConfigurationCheck(
+    brief.profile_id || "warm",
+    brief,
+    overrides,
+    onActivity,
+  );
   async function start() {
     stopVoicePreview();
+    check.setVisible(false);
     let connectionTimer: ReturnType<typeof setTimeout> | undefined;
     setError("");
     setBusy(true);
@@ -311,6 +323,8 @@ export default function Playground({
   }
   const blocked =
     !!status?.active_call ||
+    check.checking ||
+    !!status?.check_active ||
     (!running && !!status?.practice_active && !practice);
   return (
     <div className="playground-layout">
@@ -327,7 +341,7 @@ export default function Playground({
             </button>
           </div>
         )}
-        <fieldset disabled={running || busy}>
+        <fieldset disabled={running || busy || check.checking}>
           <div className="segmented" role="group" aria-label="Practice mode">
             <button
               type="button"
@@ -429,9 +443,13 @@ export default function Playground({
             practice.
           </p>
         )}
+        <CheckLauncher
+          check={check}
+          disabled={running || busy || blocked || !settingsReady}
+        />
         <fieldset
           className="practice-model-settings"
-          disabled={running || busy}
+          disabled={running || busy || check.checking}
         >
           <SettingsDisclosure
             title="Voice and model choices"
@@ -477,103 +495,110 @@ export default function Playground({
         </p>
       </aside>
       <section className="practice-conversation">
-        <header className="row-top">
-          <div>
-            <h3>
-              {running
-                ? "Practice in progress"
-                : practice
-                  ? "Practice complete"
-                  : "Conversation preview"}
-            </h3>
-            <span className="muted">
-              {practice?.configuration.profile_name ||
-                draft?.profile?.name ||
-                session.setup.profiles.find((p) => p.id === brief.profile_id)
-                  ?.name}
-            </span>
-          </div>
-          {running && (
-            <span className="pill">
-              <Mic size={13} />
-              {mode === "voice"
-                ? practice?.state === "waiting"
-                  ? "Connecting audio"
-                  : "Microphone active"
-                : "Text session"}
-            </span>
-          )}
-        </header>
-        {error && (
-          <p role="alert" className="error">
-            {error}
-          </p>
-        )}
-        {practice?.error && (
-          <p role="alert" className="error">
-            {practice.error}
-          </p>
-        )}
-        {preview !== null && (
-          <AIInputs
-            data={preview}
-            onClose={() => setPreview(null)}
-            onRefresh={previewLastSession ? showSessionInputs : showPrompt}
-          />
-        )}
-        <div className="practice-turns" aria-live="polite">
-          {practice?.messages.map((turn, i) => (
-            <article className="transcript-turn" key={i}>
-              <header>
-                <strong>
-                  {turn.speaker === "assistant" ? "Calling agent" : "You"}
-                </strong>
-                {turn.interrupted && (
-                  <span className="caption">Interrupted</span>
-                )}
-              </header>
-              <p>{turn.text}</p>
-            </article>
-          ))}
-          {partial && <p className="partial">{partial}</p>}
-          {!practice?.messages.length && (
-            <div className="empty">
-              <AudioLines size={42} />
-              <h3>{running ? "Say hello." : "Ready when you are."}</h3>
-              <p>
-                {running
-                  ? "Speak naturally. Try an interruption or a language switch."
-                  : "Start practice to hear the agent and read the conversation here."}
+        {check.visible && check.run ? (
+          <CheckResults check={check} />
+        ) : (
+          <>
+            <header className="row-top">
+              <div>
+                <h3>
+                  {running
+                    ? "Practice in progress"
+                    : practice
+                      ? "Practice complete"
+                      : "Conversation preview"}
+                </h3>
+                <span className="muted">
+                  {practice?.configuration.profile_name ||
+                    draft?.profile?.name ||
+                    session.setup.profiles.find(
+                      (p) => p.id === brief.profile_id,
+                    )?.name}
+                </span>
+              </div>
+              {running && (
+                <span className="pill">
+                  <Mic size={13} />
+                  {mode === "voice"
+                    ? practice?.state === "waiting"
+                      ? "Connecting audio"
+                      : "Microphone active"
+                    : "Text session"}
+                </span>
+              )}
+            </header>
+            {error && (
+              <p role="alert" className="error">
+                {error}
               </p>
+            )}
+            {practice?.error && (
+              <p role="alert" className="error">
+                {practice.error}
+              </p>
+            )}
+            {preview !== null && (
+              <AIInputs
+                data={preview}
+                onClose={() => setPreview(null)}
+                onRefresh={previewLastSession ? showSessionInputs : showPrompt}
+              />
+            )}
+            <div className="practice-turns" aria-live="polite">
+              {practice?.messages.map((turn, i) => (
+                <article className="transcript-turn" key={i}>
+                  <header>
+                    <strong>
+                      {turn.speaker === "assistant" ? "Calling agent" : "You"}
+                    </strong>
+                    {turn.interrupted && (
+                      <span className="caption">Interrupted</span>
+                    )}
+                  </header>
+                  <p>{turn.text}</p>
+                </article>
+              ))}
+              {partial && <p className="partial">{partial}</p>}
+              {!practice?.messages.length && (
+                <div className="empty">
+                  <AudioLines size={42} />
+                  <h3>{running ? "Say hello." : "Ready when you are."}</h3>
+                  <p>
+                    {running
+                      ? "Speak naturally. Try an interruption or a language switch."
+                      : "Start practice to hear the agent and read the conversation here."}
+                  </p>
+                </div>
+              )}
             </div>
-          )}
-        </div>
-        {running && mode === "text" && (
-          <form className="text-composer" onSubmit={send}>
-            <input
-              aria-label="Practice message"
-              placeholder="Say something to the agent…"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              disabled={busy}
-            />
-            <button
-              className="primary"
-              aria-label="Send practice message"
-              disabled={busy || !text.trim()}
-            >
-              <Send size={17} />
-            </button>
-          </form>
-        )}
-        {!!practice?.metrics.length && (
-          <footer className="practice-metrics">
-            <span className="caption">
-              {mode === "text" ? "MODEL RESPONSE" : "SERVER REPLY START"}
-            </span>
-            <strong>{practice.metrics.at(-1)!.seconds.toFixed(2)} s</strong>
-            <span className="muted">Latest measured turn</span>
-          </footer>
+            {running && mode === "text" && (
+              <form className="text-composer" onSubmit={send}>
+                <input
+                  aria-label="Practice message"
+                  placeholder="Say something to the agent…"
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  disabled={busy}
+                />
+                <button
+                  className="primary"
+                  aria-label="Send practice message"
+                  disabled={busy || !text.trim()}
+                >
+                  <Send size={17} />
+                </button>
+              </form>
+            )}
+            {!!practice?.metrics.length && (
+              <footer className="practice-metrics">
+                <span className="caption">
+                  {mode === "text" ? "MODEL RESPONSE" : "SERVER REPLY START"}
+                </span>
+                <strong>{practice.metrics.at(-1)!.seconds.toFixed(2)} s</strong>
+                <span className="muted">Latest measured turn</span>
+              </footer>
+            )}
+          </>
         )}
       </section>
     </div>

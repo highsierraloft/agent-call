@@ -14,11 +14,13 @@ import {
 export default function NewCall({
   session,
   initial,
+  followupId,
   onClose,
   onStarted,
 }: {
   session: Session;
   initial?: Brief;
+  followupId?: string;
   onClose: () => void;
   onStarted: (id: string) => void;
 }) {
@@ -107,6 +109,7 @@ export default function NewCall({
             phone: brief.target.phone.replace(/[\s().-]/g, ""),
           },
         },
+        followup_id: followupId,
         requested_by_owner: true,
         authority_basis: "Owner reviewed this call in the private dashboard",
       });

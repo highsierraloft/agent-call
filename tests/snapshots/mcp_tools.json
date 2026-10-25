@@ -515,6 +515,17 @@
           ],
           "type": "object"
         },
+        "followup_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "requested_by_owner": {
           "default": false,
           "type": "boolean"

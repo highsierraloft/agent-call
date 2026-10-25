@@ -1794,3 +1794,239 @@
     font-size: 1rem;
   }
 }
+
+@layer components {
+  .calls-workspace {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+  }
+  .calls-workspace > .section-tabs {
+    padding: 0 24px;
+    flex-shrink: 0;
+  }
+  .calls-workspace > .settings-panel {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    padding: 0;
+    overflow: hidden;
+  }
+  .calls-subview {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+  }
+  .workflow-page {
+    flex: 1;
+    min-width: 0;
+    overflow: auto;
+    padding: 28px;
+  }
+  .workflow-page > * {
+    max-width: 1000px;
+    margin-inline: auto;
+  }
+  .workflow-page h2 {
+    margin: 0 0 6px;
+  }
+  .workflow-page h3 {
+    margin: 0;
+  }
+  .workflow-page .section-heading {
+    align-items: flex-start;
+    gap: 20px;
+  }
+  .workflow-page .section-heading p {
+    margin: 4px 0 16px;
+  }
+  .workflow-filter {
+    max-width: 1000px;
+  }
+  .workflow-filter select {
+    max-width: 320px;
+  }
+  .followup-list {
+    border-top: 1px solid var(--line);
+  }
+  .followup-row {
+    padding: 22px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .followup-row .section-heading {
+    margin: 0;
+  }
+  .followup-row p {
+    margin: 12px 0;
+  }
+  .followup-editor {
+    margin-top: 24px;
+    max-width: 680px;
+  }
+  .plain-list {
+    list-style: none;
+    padding: 0;
+  }
+  .plain-list > li {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .evidence-picker {
+    max-height: 260px;
+    overflow: auto;
+    border-block: 1px solid var(--line);
+  }
+  .evidence-picker .check {
+    min-height: 44px;
+    padding: 8px 0;
+    align-items: flex-start;
+  }
+  .evidence-picker span {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .outcome-panel form {
+    margin: 20px 0 28px;
+  }
+  .outcome-panel .section-heading {
+    flex-wrap: wrap;
+  }
+  .cost-breakdown {
+    margin-bottom: 28px;
+  }
+  .cost-breakdown table,
+  .provider-totals {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+  }
+  .cost-breakdown th,
+  .cost-breakdown td,
+  .provider-totals th,
+  .provider-totals td {
+    padding: 12px 8px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  .cost-total {
+    font-size: 1.2857rem;
+    margin-block: 24px 8px;
+  }
+  .cost-calls {
+    margin-block: 16px;
+    border-top: 1px solid var(--line);
+  }
+  .cost-call {
+    width: 100%;
+    justify-content: space-between;
+    text-align: left;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    padding: 16px 4px;
+    gap: 16px;
+    white-space: normal;
+  }
+  .cost-call span:last-child {
+    text-align: right;
+    flex-shrink: 0;
+  }
+  .cost-call small {
+    display: block;
+    color: var(--muted);
+    margin-top: 3px;
+  }
+  .workflow-page .settings-disclosure {
+    margin-top: 28px;
+  }
+  .check-launch {
+    padding: 12px 0 16px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 16px;
+  }
+  .check-launch > button:first-child {
+    width: 100%;
+  }
+  .check-launch p {
+    margin: 8px 0;
+  }
+  .configuration-check-results {
+    min-width: 0;
+    overflow: auto;
+    padding-bottom: 28px;
+  }
+  .configuration-check-results .section-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .configuration-check-results .section-heading p {
+    overflow-wrap: anywhere;
+  }
+  .configuration-check-results progress {
+    width: 100%;
+    margin: 16px 0;
+    accent-color: var(--accent);
+  }
+  .check-scenarios {
+    margin: 20px 0;
+  }
+  .check-scenarios summary {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: center;
+    min-height: 52px;
+    cursor: pointer;
+  }
+  .check-scenarios details {
+    border-bottom: 1px solid var(--line);
+    padding: 8px 0;
+  }
+  .check-scenarios details p {
+    max-width: 72ch;
+  }
+  .configuration-check-results pre {
+    max-height: 360px;
+    overflow: auto;
+  }
+}
+@layer responsive {
+  @media (max-width: 40.625em) {
+    .calls-workspace > .section-tabs {
+      padding-inline: 20px;
+    }
+    .workflow-page {
+      padding: 20px;
+    }
+    .workflow-page .section-heading {
+      flex-wrap: wrap;
+    }
+    .workflow-page .section-heading label {
+      width: 100%;
+    }
+    .cost-breakdown table {
+      font-size: 0.9286rem;
+    }
+    .cost-breakdown th,
+    .cost-breakdown td {
+      padding-inline: 4px;
+      overflow-wrap: anywhere;
+    }
+    .cost-breakdown td:last-child {
+      max-width: 140px;
+    }
+    .detail-tabs {
+      overflow-x: auto;
+    }
+    .followup-row .save-row {
+      flex-wrap: wrap;
+    }
+    .configuration-check-results {
+      padding-bottom: 84px;
+    }
+  }
+}

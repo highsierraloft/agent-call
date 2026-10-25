@@ -100,6 +100,9 @@ class FakeAsterisk:
 class FakeVoice:
     def __init__(self, websocket, **kwargs):
         self.callbacks = kwargs["callbacks"]
+        from app.call_ai_inputs import ModelRequestTrace
+
+        self.request_trace = ModelRequestTrace()
         self.ready = asyncio.Event()
         self.done = asyncio.Event()
         self.started = False
@@ -240,7 +243,8 @@ async def test_persists_transcript_only_after_confirmed_carrier_hangup(android):
     assert [t["text"] for t in result["transcript"]] == ["We open at nine.", "Thank you. Goodbye."]
     assert result["result"]["result_source"] == "transcript_only"
     assert result["result"]["outcome"] == "unknown"
-    assert result["cost"] is None
+    assert result["cost"]["coverage"] == "pending"
+    assert result["cost"]["total_usd"] is None
 
 
 @pytest.mark.parametrize("blocker", ["phone", "registration", "supervision"])

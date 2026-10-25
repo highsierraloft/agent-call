@@ -55,6 +55,17 @@ export async function installFixture(page: Page) {
       },
     },
   };
+  records.pricing = {
+    entity: "pricing",
+    revision: 1,
+    created_at: "2026-10-25T08:00:00Z",
+    value: {
+      soniox_usd_per_hour: 0.12,
+      inworld_tts2_usd_per_million_characters: 25,
+      inworld_flash_usd_per_million_characters: 15,
+      note: "On-demand assumptions. Carrier charges excluded.",
+    },
+  };
   for (const name of ["Warm", "Professional", "Salesperson", "Playful"])
     records["profile:" + name.toLowerCase()] = {
       entity: "profile:" + name.toLowerCase(),
@@ -69,6 +80,15 @@ export async function installFixture(page: Page) {
     records,
     histories,
     prepared: 0,
+    prepareRequest: null as any,
+    assessments: {} as Record<string, any>,
+    followups: [] as any[],
+    check: null as any,
+    checkStarts: 0,
+    checkRequest: null as any,
+    checkAutoFinish: true,
+    checkFails: false,
+
     loseStartResponse: false,
     previewFetches: 0,
     previewUnavailable: false,
@@ -265,6 +285,8 @@ export async function installFixture(page: Page) {
         practice_active:
           !!state.practice &&
           !["stopped", "failed"].includes(state.practice.state),
+        check_active: state.check?.state === "running",
+        check_id: state.check?.state === "running" ? state.check.id : null,
         last_hermes_request: null,
       });
     if (path === "/catalog")
@@ -399,6 +421,159 @@ export async function installFixture(page: Page) {
         return respond(records[entity]);
       }
     }
+    if (path === "/checks" && method === "GET")
+      return respond({
+        checks: state.check ? [state.check] : [],
+        active_id: state.check?.state === "running" ? state.check.id : null,
+      });
+    if (path === "/checks" && method === "POST") {
+      state.checkStarts++;
+      state.checkRequest = body;
+      state.check = {
+        id: "check_fixture",
+        state: "running",
+        configuration: {
+          ...snapshot,
+          voice: { ...voice, ...body.overrides?.voice },
+          unsaved: !!body.overrides,
+          check_fingerprint: "captured-settings",
+        },
+        created_at: "2026-10-25T08:00:00Z",
+        updated_at: "2026-10-25T08:00:00Z",
+        scenario_names: [
+          "corrected_details",
+          "missing_facts",
+          "unauthorized_commitment",
+          "refusal",
+          "language_switching",
+          "premature_ending",
+        ],
+        scenario_count: 6,
+        judge_model: "openai/gpt-6-luna",
+        scope: "Synthetic conversations; no calls.",
+        error: null,
+        results: [],
+      };
+      return respond(state.check);
+    }
+    if (path.startsWith("/checks/")) {
+      if (method === "DELETE") {
+        state.check.state = "cancelled";
+        return route.fulfill({ status: 204 });
+      }
+      if (state.check?.state === "running" && state.checkAutoFinish) {
+        state.check.state = state.checkFails ? "failed" : "passed";
+        state.check.results = state.check.scenario_names.map(
+          (name: string, i: number) => ({
+            name,
+            status: state.checkFails && i === 1 ? "failed" : "passed",
+            reason:
+              state.checkFails && i === 1
+                ? "The response invented a price."
+                : "Expected behavior observed.",
+            responses: [
+              {
+                type: "llm_response",
+                text: "I will check the missing price and call back.",
+              },
+            ],
+            objective: "Answer from the approved facts.",
+            messages: ["How much does it cost?"],
+            duration_ms: 2100,
+          }),
+        );
+      }
+      return respond(state.check);
+    }
+    if (path === "/followups")
+      return respond({
+        followups: state.followups.filter(
+          (f) =>
+            url.searchParams.get("status") === "all" ||
+            !["completed", "cancelled"].includes(f.status),
+        ),
+        next_offset: null,
+        automatic_dialing: false,
+      });
+    if (path.startsWith("/followups/")) {
+      const id = path.split("/")[2];
+      const item = state.followups.find((f) => f.followup_id === id);
+      if (path.endsWith("/brief"))
+        return respond({
+          followup_id: id,
+          context: {
+            ...brief,
+            objective: item.value.objective,
+            relevant_facts: [
+              ...brief.relevant_facts,
+              ...(item.value.new_facts || []),
+            ],
+          },
+          needed_information: item.value.needed_information,
+          dialed: false,
+        });
+      if (method === "PUT") {
+        if (body.expected_revision !== item.revision)
+          return respond(
+            { detail: "This follow-up changed in another window." },
+            409,
+          );
+        item.revision++;
+        item.status = body.status;
+        item.value = { ...item.value, ...body };
+        item.updated_at = new Date().toISOString();
+        return respond(item);
+      }
+    }
+    if (path === "/costs")
+      return respond({
+        month: url.searchParams.get("month"),
+        timezone: "Atlantic/Canary",
+        currency: "USD",
+        scope:
+          "Telephone calls only. Provider estimates exclude carrier charges and taxes.",
+        call_count: 2,
+        coverage: { complete: 1, partial: 0, unavailable: 1 },
+        known_subtotal_usd: 0.0274,
+        providers: [
+          { provider: "OpenRouter", usd: 0.0004 },
+          { provider: "Soniox", usd: 0.002 },
+          { provider: "Inworld", usd: 0.025 },
+        ],
+        next_offset: null,
+        calls: [
+          {
+            call_id: "call_demo_1",
+            created_at: "2026-10-24T08:20:00Z",
+            target: "Alex Morgan",
+            state: "completed",
+            duration_seconds: 60,
+            cost: {
+              coverage: "complete",
+              currency: "USD",
+              total_usd: 0.0274,
+              known_subtotal_usd: 0.0274,
+              providers: [],
+              note: "Estimate",
+            },
+          },
+          {
+            call_id: "call_demo_2",
+            created_at: "2026-10-23T13:00:00Z",
+            target: "Bookshop",
+            state: "completed",
+            duration_seconds: 48,
+            cost: {
+              coverage: "unavailable",
+              currency: "USD",
+              total_usd: null,
+              known_subtotal_usd: null,
+              providers: [],
+              note: "Not recorded",
+            },
+          },
+        ],
+      });
     if (path === "/prompt-preview") {
       state.previewRequest = body;
       return respond({
@@ -461,6 +636,7 @@ export async function installFixture(page: Page) {
     }
     if (path === "/calls/prepare") {
       state.prepared++;
+      state.prepareRequest = body;
       state.brief = body.context;
       return respond({
         plan_id: "plan_local_test",
@@ -503,6 +679,62 @@ export async function installFixture(page: Page) {
           call_id: id,
           state: state.active ? "active" : "completed",
         };
+      if (parts[3] === "outcome") {
+        if (method === "PUT") {
+          const current = state.assessments[id];
+          if (body.expected_revision !== (current?.revision || 0))
+            return respond(
+              { detail: "The outcome changed in another window." },
+              409,
+            );
+          state.assessments[id] = {
+            call_id: id,
+            revision: (current?.revision || 0) + 1,
+            actor: "owner",
+            updated_at: new Date().toISOString(),
+            value: {
+              status: body.status,
+              explanation: body.explanation,
+              evidence_turn_ids: body.evidence_turn_ids,
+              facts: body.facts,
+            },
+          };
+          for (const cb of body.callbacks || []) {
+            if (
+              !state.followups.some((f) => f.value.source_key === cb.source_key)
+            )
+              state.followups.push({
+                followup_id: "followup_" + cb.source_key,
+                source_call_id: id,
+                revision: 1,
+                status: cb.needed_information.length
+                  ? "needs_information"
+                  : "ready",
+                value: {
+                  ...cb,
+                  new_facts: [],
+                  note: "",
+                  completion_call_id: null,
+                },
+                actor: "owner",
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                target: brief.target,
+                recipient_opted_out: false,
+                attempts: [],
+              });
+          }
+          return respond({
+            call_id: id,
+            revision: state.assessments[id].revision,
+            followup_ids: state.followups.map((f) => f.followup_id),
+          });
+        }
+        return respond({
+          assessment: state.assessments[id] || null,
+          followups: state.followups.filter((f) => f.source_call_id === id),
+        });
+      }
       if (parts[3] === "ai-inputs")
         return respond(
           id === "call_demo_2"
@@ -539,6 +771,8 @@ export async function installFixture(page: Page) {
         configuration: id === "call_demo_2" ? null : snapshot,
         prompt: "Saved prompt for this call.",
         annotation: state.annotation,
+        assessment: state.assessments[id] || null,
+        followups: state.followups.filter((f) => f.source_call_id === id),
         timing: call,
         latency: [
           {
@@ -559,18 +793,21 @@ export async function installFixture(page: Page) {
         transcript: [
           {
             sequence_number: 1,
+            turn_id: "turn_1",
             speaker: "assistant",
             text: "Hi Alex, I’m calling for the owner about the weekend walk.",
             created_at: "2026-10-24T08:20:16Z",
           },
           {
             sequence_number: 2,
+            turn_id: "turn_2",
             speaker: "callee",
             text: "Saturday afternoon works. Can we meet by the park?",
             created_at: "2026-10-24T08:20:20Z",
           },
           {
             sequence_number: 3,
+            turn_id: "turn_3",
             speaker: "assistant",
             text: "That works. What time would suit you?",
             created_at: "2026-10-24T08:20:24Z",

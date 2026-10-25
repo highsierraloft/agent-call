@@ -334,6 +334,9 @@ class DatabaseEngine:
         from app.db.control import CONTROL_SCHEMA
 
         await conn.executescript(CONTROL_SCHEMA)
+        from app.db.workflows import WORKFLOW_SCHEMA
+
+        await conn.executescript(WORKFLOW_SCHEMA)
         async with conn.execute("PRAGMA table_info(calls)") as cursor:
             existing = {row[1] for row in await cursor.fetchall()}
         for legacy_name, current_name in (

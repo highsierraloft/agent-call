@@ -76,6 +76,8 @@ export interface Status {
   phone: { phase: string; call_ready: boolean };
   active_call: string | null;
   practice_active: boolean;
+  check_active?: boolean;
+  check_id?: string | null;
   last_hermes_request: { observed_at: string } | null;
 }
 export interface Brief {
@@ -108,6 +110,8 @@ export interface Brief {
 export interface Call {
   call_id: string;
   state: string;
+  outcome_status?: OutcomeStatus | null;
+  pending_followups?: number;
   created_at: string;
   answered_at: string | null;
   ended_at: string | null;
@@ -120,6 +124,7 @@ export interface Call {
   personality: Personality;
 }
 export interface Turn {
+  turn_id?: string;
   speaker: string;
   text: string;
   sequence_number?: number;
@@ -196,6 +201,9 @@ export interface Detail {
   configuration: Snapshot | null;
   prompt: string | null;
   annotation: { note: string; tags: string[] };
+  assessment?: CallAssessment | null;
+  followups?: Followup[];
+  cost?: ProviderCost;
   timing: Pick<
     Call,
     | "created_at"
@@ -242,3 +250,123 @@ export const sampleBrief = (setup: Setup, profileId = "warm"): Brief => ({
   hard_constraints: [],
   escalation: { mode: "end_call" },
 });
+
+export type OutcomeStatus =
+  "achieved" | "declined" | "incomplete" | "uncertain";
+export type FollowupStatus =
+  "needs_information" | "ready" | "completed" | "cancelled";
+export interface SupportedFact {
+  text: string;
+  evidence_turn_ids: string[];
+}
+export interface CallAssessment {
+  call_id: string;
+  revision: number;
+  actor: string;
+  updated_at: string;
+  value: {
+    status: OutcomeStatus;
+    explanation: string;
+    evidence_turn_ids: string[];
+    facts: SupportedFact[];
+  };
+}
+export interface CallbackDraft {
+  source_key: string;
+  objective: string;
+  source: "agent_promise" | "recipient_request" | "owner_request";
+  needed_information: string[];
+  evidence_turn_ids: string[];
+  window_start: string | null;
+  window_end: string | null;
+  timezone: string | null;
+}
+export interface Followup {
+  followup_id: string;
+  source_call_id: string;
+  revision: number;
+  status: FollowupStatus;
+  value: CallbackDraft & {
+    new_facts?: string[];
+    note: string;
+    completion_call_id: string | null;
+  };
+  actor: string;
+  created_at: string;
+  updated_at: string;
+  target: { name: string; phone: string };
+  recipient_opted_out: boolean;
+  attempts: {
+    plan_id: string;
+    call_id: string | null;
+    state: string | null;
+    created_at: string | null;
+    ended_at: string | null;
+    outcome: OutcomeStatus | null;
+  }[];
+}
+export interface ProviderCost {
+  currency: string;
+  coverage: "complete" | "partial" | "unavailable" | "pending";
+  total_usd: number | null;
+  known_subtotal_usd: number | null;
+  note: string;
+  providers: {
+    provider: string;
+    usd: number | null;
+    basis: string;
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    requests_missing?: number;
+    session_seconds?: number;
+    input_characters?: number;
+  }[];
+  pricing?: { revision: number; rates: Pricing; captured_at: string };
+}
+export interface Pricing {
+  soniox_usd_per_hour: number;
+  inworld_tts2_usd_per_million_characters: number;
+  inworld_flash_usd_per_million_characters: number;
+  note: string;
+}
+export interface MonthlyCosts {
+  month: string;
+  timezone: string;
+  currency: string;
+  scope: string;
+  call_count: number;
+  coverage: { complete: number; partial: number; unavailable: number };
+  known_subtotal_usd: number;
+  providers: { provider: string; usd: number }[];
+  calls: {
+    call_id: string;
+    created_at: string;
+    target: string;
+    state: string;
+    duration_seconds: number | null;
+    cost: ProviderCost;
+  }[];
+  next_offset: number | null;
+}
+export interface ConfigurationCheck {
+  id: string;
+  state:
+    "running" | "stopping" | "passed" | "failed" | "cancelled" | "interrupted";
+  configuration: Snapshot & { check_fingerprint: string };
+  created_at: string;
+  updated_at: string;
+  scenario_count: number;
+  scenario_names: string[];
+  judge_model: string;
+  scope: string;
+  error: string | null;
+  results: {
+    name: string;
+    status: "passed" | "failed" | "skipped";
+    reason: string;
+    duration_ms?: number;
+    objective?: string;
+    messages?: string[];
+    responses: { type: string; text: string }[];
+  }[];
+}

@@ -336,6 +336,80 @@ The Spanish mobile SIM is therefore not a route for unrestricted unsolicited sal
 See [AEPD's automated-call guidance](https://www.aepd.es/preguntas-frecuentes/5-publicidad-no-deseada/FAQ-0502-llamadas-automatizadas-sin-intervencion-humana-con-fines-comerciales)
 and [Order TDF/149/2025, article 9](https://www.boe.es/buscar/act.php?id=BOE-A-2025-2870#a9).
 
+## Outcomes, callbacks, and costs
+
+Calls has three views: History, Follow-ups, and Costs. The Outcome tab stores an
+assessment separately from the original transcript. Possible outcomes are achieved,
+declined, incomplete, and uncertain. A completed telephone connection does not prove task success.
+
+After reading every transcript page, Hermes calls `save_call_outcome`. Confirmed facts
+cite exact transcript `turn_id` values. Hermes also needs evidence for achieved or
+declined outcomes. The owner can enter a manual assessment without transcript evidence.
+The service does not run a separate post-call analysis model.
+
+Outcome saves use an expected revision and a stable request ID. An identical retry
+returns the original result. A changed request body needs a new request ID. Revisions
+preserve earlier assessments. Stable callback `source_key` values prevent duplicate work.
+A later assessment cannot reset an edited or completed callback.
+
+`get_call_followups` reads callback promises, missing information, agreed windows, and linked attempts.
+`update_call_followup` changes their status with revision checks. The owner or Hermes
+can add verified `new_facts` before marking a callback Ready. Dates require an explicit
+offset and timezone. An absent agreement remains “No agreed time.” There is no automatic dialer or scheduler.
+
+Ready callbacks use the original recipient and the normal preparation and confirmation flow.
+`prepare_phone_call` accepts optional `followup_id`. The plan retains this link and its frozen brief.
+Cancellation or renewed missing information blocks an older prepared attempt.
+Recipient opt-outs still apply. For an uncertain start, recovery uses the original plan ID.
+Hermes can complete a callback only after a linked terminal call has an achieved or declined assessment.
+The owner can close work resolved outside a telephone call with an explanatory note.
+
+Costs uses USD and groups telephone calls by their start month in the owner's timezone.
+Each new plan freezes pricing assumptions. Changes to those assumptions affect future preparations only.
+OpenRouter cost comes from provider-reported response usage, with frozen catalog rates as a fallback.
+Soniox uses connected-session duration and an approximate hourly equivalent.
+Inworld uses submitted characters, including text interrupted before playback.
+Interrupted model responses without usage produce partial totals. Historical missing usage remains unknown.
+
+The initial assumptions use [Soniox pricing](https://soniox.com/pricing) and
+[Inworld pricing](https://inworld.ai/pricing), checked on 25 October 2026.
+Soniox's token billing is approximately $0.12 per hour. Inworld on-demand rates are
+$25 per million characters for TTS-2 and $15 for TTS-2 Flash. The owner can edit these
+assumptions for their plan. Carrier charges, taxes, subscriptions, credits, practice,
+and configuration checks are outside telephone totals. These estimates are not invoices.
+Usage counters stay in memory during speech. SQLite stores usage and the estimate after the voice session ends.
+
+## Playground configuration check
+
+**Check Configuration** runs six synthetic text scenarios through the existing voice pipeline
+and Pipecat Evals. It uses the selected profile and temporary editor choices.
+Scenarios cover corrected facts, missing facts, unauthorized commitments, refusal,
+language switching, and premature endings. A single enabled language skips the language-switching scenario.
+
+Results retain the tested settings, fingerprint, example responses, and failure reasons.
+They remain separate from telephone records. The judge uses GPT-6 Luna through the
+existing OpenRouter account only for these checks. Provider usage applies, including
+speech connections opened by the pipeline. This action does not measure audible voice quality or carrier delay.
+
+A check has a five-minute limit and shares capacity with calls and practice.
+**Stop Check** releases provider connections before capacity becomes available.
+A service restart marks unfinished checks Interrupted. The deployment lease rejects active checks.
+The local evaluation listener uses an ephemeral loopback port and a random capability path.
+It has no dialing interface. Phone listening remains a separate acceptance step.
+
+The database migration adds tables and preserves earlier records. On rollback, keep calls
+disabled until new callback plans expire or an operator reconciles them. Earlier workers
+do not enforce callback status. Never overwrite new records with the pre-release database.
+
+The workflow release passed 1,020 backend tests with two skips and 88.39% coverage.
+All 104 browser checks passed across Chromium, dark appearance, desktop WebKit, and phone WebKit.
+Six real-provider configuration scenarios passed in an isolated database copy.
+The trial preserved telephone records and snapshots, then released provider sessions.
+The five-turn audio replay measured 1.209–1.700 seconds, within the existing two-second target.
+The earlier v2 replay measured 1.119–1.495 seconds. These small samples do not establish latency percentiles or handset quality.
+Usage capture included interrupted model requests without final usage. Their costs remain explicitly partial.
+No real telephone call was placed.
+
 ## Conversational delivery
 
 The voice instructions use a brief, relationship-appropriate greeting instead of a mandatory technical identity announcement.
@@ -442,7 +516,7 @@ The worker serves authenticated MCP at `/mcp/` and an authenticated media WebSoc
 Keep both private. `/healthz` is process liveness; `/readyz` checks control supervision.
 Phone and registration checks also run at admission. Health alone does not mean that a call can start.
 Only Asterisk's SIP and RTP ports need a narrow phone-to-server network rule.
-Back up configuration and confirm no active call before deployment.
+Back up configuration before deployment. Verify that calls, practice, and configuration checks are idle.
 
 Default speech services are Deepgram Nova-3 and Eleven Flash v2.5, using the Sarah voice.
 Both use the same OpenRouter key. A small server comparison found faster recognition with Nova-3

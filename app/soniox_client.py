@@ -8,6 +8,8 @@ from typing import Any
 
 from pipecat.services.soniox.stt import SonioxSTTService
 
+from app.provider_usage import UsageLedger
+
 
 class _SonioxMessages:
     def __init__(self, websocket: Any) -> None:
@@ -33,5 +35,21 @@ class _SonioxMessages:
 
 
 class SonioxVoiceSTTService(SonioxSTTService):
+    def __init__(self, *, usage: UsageLedger | None = None, **kwargs: Any) -> None:
+        self.usage = usage
+        super().__init__(**kwargs)
+
+    async def _connect_websocket(self) -> None:
+        await super()._connect_websocket()  # type: ignore[no-untyped-call]
+        if self.usage and self._websocket is not None:
+            self.usage.start_stt()
+
+    async def _disconnect_websocket(self) -> None:
+        try:
+            await super()._disconnect_websocket()  # type: ignore[no-untyped-call]
+        finally:
+            if self.usage:
+                self.usage.stop_stt()
+
     def _get_websocket(self) -> _SonioxMessages:
         return _SonioxMessages(super()._get_websocket())  # type: ignore[no-untyped-call]

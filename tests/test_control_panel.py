@@ -63,7 +63,7 @@ async def seed_call(h, call_id="call_control_test", turns=1):
     await h.service.db.claim_plan_and_create_call(
         plan_id=plan.plan_id,
         call_id=call_id,
-        conference_name="control-test",
+        conference_name="control-test-" + call_id,
         confirmation_text=plan.confirmation_summary,
     )
     now = datetime.now(UTC).isoformat()

@@ -71,6 +71,11 @@ class PlansMixin:
                     "INSERT INTO plan_configurations VALUES (?,?)",
                     (plan_id, json.dumps(configuration_snapshot, ensure_ascii=False)),
                 )
+                if configuration_snapshot.get("followup_id"):
+                    await conn.execute(
+                        "INSERT INTO call_followup_plans VALUES (?,?,?)",
+                        (configuration_snapshot["followup_id"], plan_id, now),
+                    )
 
     async def get_plan(self: DatabaseAccess, plan_id: str) -> dict[str, Any] | None:
         row = await self.fetch_one(
@@ -126,7 +131,9 @@ class PlansMixin:
                 )
             cursor = await conn.execute(
                 """UPDATE plans SET state='started', call_id=?, confirmation_text=?
-                   WHERE plan_id=? AND state='prepared' AND expires_at>?""",
+                   WHERE plan_id=? AND state='prepared' AND expires_at>?
+                   AND NOT EXISTS (SELECT 1 FROM call_followup_plans fp JOIN call_followups f
+                   USING(followup_id) WHERE fp.plan_id=plans.plan_id AND (f.status != 'ready' OR json_array_length(json_extract(f.value_json,'$.needed_information')) > 0))""",
                 (call_id, confirmation_text, plan_id, now),
             )
             if cursor.rowcount != 1:

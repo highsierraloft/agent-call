@@ -5,15 +5,27 @@ from typing import Any
 from pipecat.frames.frames import AggregatedTextFrame
 from pipecat.services.inworld.tts import InworldTTSService
 
+from app.provider_usage import UsageLedger
 from app.spoken_identity import SpeakerIdentityFilter
 
 
 class InworldVoiceTTSService(InworldTTSService):
     def __init__(
-        self, *, identity_filter: SpeakerIdentityFilter | None = None, **kwargs: Any
+        self,
+        *,
+        identity_filter: SpeakerIdentityFilter | None = None,
+        usage: UsageLedger | None = None,
+        **kwargs: Any,
     ) -> None:
         self.identity_filter = identity_filter
+        self.usage = usage
         super().__init__(**kwargs)
+
+    async def start_tts_usage_metrics(self, text: str) -> None:
+        # The pinned adapter calls this only after sending the text successfully.
+        if self.usage:
+            self.usage.tts_characters += len(text)
+        await super().start_tts_usage_metrics(text)
 
     async def _handle_aggregated_text(
         self, src_frame: AggregatedTextFrame, context_id: str | None = None

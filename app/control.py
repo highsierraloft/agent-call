@@ -14,6 +14,8 @@ from zoneinfo import ZoneInfo
 from app.android_config import AndroidConfig
 from app.call_ai_inputs import Mode, describe_inputs
 from app.call_personalities import PERSONALITIES
+from app.call_spending import CallSpending
+from app.configuration_checks import ConfigurationChecks
 from app.control_models import (
     DEFAULT_CALLING_GUIDE,
     CallingGuide,
@@ -25,9 +27,11 @@ from app.db import Database
 from app.errors import CallRefusal
 from app.model_capabilities import validate_reasoning
 from app.models import ContextPacket
+from app.provider_usage import PricingSettings
 from app.voice_catalog import VoiceCatalog
 from app.voice_preview import VoicePreviews
 from app.voice_prompts import voice_instructions
+from app.workflows import CallWorkflows
 
 if TYPE_CHECKING:
     from app.android_calls import AndroidCallService
@@ -41,6 +45,9 @@ class ControlPlane:
         self._seed_lock = asyncio.Lock()
         self._seeded = False
         self.practice = Playground(self)
+        self.workflows = CallWorkflows(self)
+        self.spending = CallSpending(self)
+        self.checks = ConfigurationChecks(self)
         self.catalog = VoiceCatalog(service.config, service._api_key)
         self.voice_previews = VoicePreviews(self.catalog)
 
@@ -59,6 +66,7 @@ class ControlPlane:
                 "global", GlobalConfiguration(voice=voice).model_dump(mode="json")
             )
             await self.db.control_seed("guide", {"text": DEFAULT_CALLING_GUIDE})
+            await self.db.control_seed("pricing", PricingSettings().model_dump(mode="json"))
             for name, prompt in PERSONALITIES.items():
                 value = ProfileConfiguration.model_validate(
                     {
@@ -69,9 +77,13 @@ class ControlPlane:
                     }
                 )
                 await self.db.control_seed("profile:" + name, value.model_dump(mode="json"))
-            from app.control_migration import migrate_contract
+            from app.control_migration import migrate_contract, migrate_workflow_guide
 
             await migrate_contract(self.db)
+            await migrate_workflow_guide(self.db)
+            await self.db.execute(
+                "UPDATE configuration_checks SET state='interrupted',error='The service restarted before this check finished.' WHERE state IN ('running','stopping')"
+            )
             self._seeded = True
 
     async def current(self, entity: str) -> dict[str, Any]:
@@ -103,6 +115,8 @@ class ControlPlane:
                     )
                 )
             payload = valid.model_dump(mode="json")
+        elif entity == "pricing":
+            payload = PricingSettings.model_validate(value).model_dump(mode="json")
         elif entity == "guide":
             payload = CallingGuide.model_validate(value).model_dump(mode="json")
         elif re.fullmatch(r"profile:[a-z0-9][a-z0-9_-]{0,63}", entity):
@@ -171,6 +185,7 @@ class ControlPlane:
             "prompts": global_value.prompts.model_dump(),
             "voice": voice.model_dump(mode="json"),
             "model_capabilities": model,
+            "pricing": await self.spending.freeze(voice.model_dump(mode="json"), model),
             "unsaved": bool(overrides),
         }
 
@@ -303,6 +318,8 @@ class ControlPlane:
             },
             "active_call": active[0]["call_id"] if active else None,
             "practice_active": self.practice.active is not None,
+            "check_active": self.checks.active is not None,
+            "check_id": self.checks.active.id if self.checks.active else None,
             "last_hermes_request": await self.db.fetch_one(
                 "SELECT observed_at FROM control_activity WHERE name='hermes_setup'"
             ),
@@ -314,6 +331,7 @@ class ControlPlane:
         *,
         query: str = "",
         state: str = "",
+        outcome: str = "",
         language: str = "",
         profile: str = "",
         start: str = "",
@@ -322,6 +340,13 @@ class ControlPlane:
         limit: int = 40,
     ) -> dict[str, Any]:
         clauses, values = ["1=1"], []
+        if outcome:
+            if outcome not in {"achieved", "declined", "incomplete", "uncertain", "not_recorded"}:
+                raise ValueError("Unknown outcome filter")
+            clauses.append(
+                "COALESCE((SELECT json_extract(a.value_json,'$.status') FROM call_assessments a WHERE a.call_id=c.call_id ORDER BY a.revision DESC LIMIT 1),'not_recorded')=?"
+            )
+            values.append(outcome)
         if query:
             needle = (
                 "%"
@@ -377,7 +402,7 @@ class ControlPlane:
                 raise ValueError("Invalid call history cursor") from exc
             clauses.append("(c.created_at<? OR (c.created_at=? AND c.call_id<?))")
             values.extend([stamp, stamp, call_id])
-        sql = "SELECT c.call_id,c.state,c.created_at,c.answered_at,c.ended_at,c.duration_seconds,c.termination_reason,p.context_json,pc.snapshot_json "
+        sql = "SELECT c.call_id,c.state,c.created_at,c.answered_at,c.ended_at,c.duration_seconds,c.termination_reason,p.context_json,pc.snapshot_json,(SELECT json_extract(a.value_json,'$.status') FROM call_assessments a WHERE a.call_id=c.call_id ORDER BY a.revision DESC LIMIT 1) outcome_status,(SELECT COUNT(*) FROM call_followups f WHERE f.source_call_id=c.call_id AND f.status IN ('ready','needs_information')) pending_followups "
         sql += (
             "FROM calls c JOIN plans p ON p.plan_id=c.plan_id LEFT JOIN plan_configurations pc ON pc.plan_id=p.plan_id WHERE "
             + " AND ".join(clauses)
@@ -426,6 +451,10 @@ class ControlPlane:
             "configuration": snapshot,
             "prompt": self.prompt(plan.context, snapshot) if plan and snapshot else None,
             "annotation": await self.db.control_annotation(call_id),
+            "assessment": await self.workflows.assessment(call_id),
+            "followups": (await self.workflows.list_followups(call_id=call_id, status="all"))[
+                "followups"
+            ],
             "timing": {
                 key: row.get(key)
                 for key in [

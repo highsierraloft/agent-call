@@ -62,6 +62,11 @@ def register_tools(
             result: dict[str, Any] = await method()
             return result
 
+    if android_backend:
+        from app.workflow_mcp import register_workflow_tools
+
+        register_workflow_tools(mcp, get_service, auth_meta)
+
     @mcp.tool(
         name="prepare_phone_call",
         annotations={
@@ -91,13 +96,17 @@ def register_tools(
         context: ContextPacket,
         authority_basis: str | None = None,
         requested_by_owner: bool = False,
+        followup_id: str | None = None,
     ) -> dict[str, Any]:
         try:
+            if followup_id and not android_backend:
+                raise ValueError("Callback tracking is unavailable in this backend")
             output = await get_service().prepare(
                 PreparePhoneCallInput(
                     context=context,
                     authority_basis=authority_basis,
                     requested_by_owner=requested_by_owner,
+                    followup_id=followup_id,
                 )
             )
             return output.model_dump(mode="json")

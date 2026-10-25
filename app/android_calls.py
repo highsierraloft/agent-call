@@ -134,6 +134,11 @@ class AndroidCallService:
             raise CallRefusal(
                 "profile_not_found", "Select a profile from get_calling_setup"
             ) from exc
+        if request.followup_id:
+            await self.control.workflows.validate_followup_plan(
+                request.followup_id, request.context
+            )
+            snapshot["followup_id"] = request.followup_id
         packet = self.control.normalize_packet(request.context, snapshot)
         self.control.freeze_inputs(packet, snapshot)
         return await prepare_call(
@@ -152,8 +157,11 @@ class AndroidCallService:
         if not self.settings.live_calls_enabled:
             raise CallRefusal(ErrorCode.LIVE_CALLS_DISABLED)
         async with self._operations:
-            if self.control.practice.active is not None:
-                raise CallRefusal(ErrorCode.CALL_BUSY, "A browser practice session is active")
+            if self.control.practice.active is not None or self.control.checks.active is not None:
+                raise CallRefusal(
+                    ErrorCode.CALL_BUSY,
+                    "A browser practice session or configuration check is active",
+                )
             if not self.supervision_ready():
                 raise CallRefusal(ErrorCode.SUPERVISION_UNAVAILABLE)
             problem = self.phone.admission_problem()
@@ -164,6 +172,10 @@ class AndroidCallService:
                 raise CallRefusal(ErrorCode.PLAN_NOT_FOUND)
             configuration = await self.db.control_plan(plan_id)
             config = self.control.runtime_config(configuration)
+            if configuration and configuration.get("followup_id"):
+                await self.control.workflows.validate_followup_plan(
+                    configuration["followup_id"], plan.context
+                )
             self._validate_packet(plan.context, config)
             if await self.db.is_destination_suppressed(plan.context.target.phone):
                 raise CallRefusal("recipient_opted_out", "The recipient requested no further calls")
@@ -282,6 +294,11 @@ class AndroidCallService:
     async def _save_model_request(self, runtime: _Call) -> None:
         if runtime.voice is None:
             return
+        usage = getattr(runtime.voice, "usage", None)
+        if usage is not None:
+            await self.db.control_usage(
+                runtime.call_id, usage.snapshot(), (runtime.configuration or {}).get("pricing")
+            )
         latest = await asyncio.to_thread(runtime.voice.request_trace.view)
         if latest is not None:
             await self.db.control_model_request(runtime.call_id, latest)
@@ -491,6 +508,7 @@ class AndroidCallService:
 
     async def stop(self) -> None:
         self._stopping = True
+        await self.control.checks.cancel()
         await self.control.practice.close()
         for row in await self.db.list_nonterminal_calls():
             await self.terminate_call(row["call_id"], "service_shutdown")
@@ -552,15 +570,21 @@ class AndroidCallService:
         configuration = await self.db.control_plan(call_row["plan_id"]) if call_row else None
         return {
             "configuration": self.control.reference(configuration),
+            "followup_id": (configuration or {}).get("followup_id"),
             "call_id": call_id,
             "state": snapshot.state,
             "result": result.model_dump(mode="json") if result else None,
-            "cost": None,
-            "cost_note": "Carrier and voice-provider usage are not reconciled here.",
+            "cost": await self.control.spending.for_call(call_id),
+            "cost_note": "Provider estimates exclude carrier charges, taxes, plan fees, and credits. Missing usage is not zero.",
             "artifacts": artifacts,
             "next_transcript_cursor": turns[99].sequence_number if len(turns) > 100 else None,
             "transcript_is_call_content": True,
             "recipient_opted_out": await self.db.call_recorded_opt_out(call_id),
+            "assessment": await self.control.workflows.assessment(call_id),
+            "followups": (
+                await self.control.workflows.list_followups(call_id=call_id, status="all")
+            )["followups"],
+            "next_action": "After the call is terminal and all transcript pages are read, save the task outcome and callback promises with save_call_outcome. Use exact transcript turn IDs as evidence. Ended calls do not imply successful tasks.",
             "transcript": [turn.model_dump(mode="json") for turn in turns[:100]],
         }
 
@@ -594,7 +618,7 @@ class AndroidCallService:
 
     async def acquire_deployment_lock(self) -> int:
         async with self._operations:
-            if self.control.practice.active is not None:
+            if self.control.practice.active is not None or self.control.checks.active is not None:
                 return 1
             return await self.db.acquire_deployment_lock()
 

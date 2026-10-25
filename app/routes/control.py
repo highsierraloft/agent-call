@@ -20,6 +20,7 @@ from app.control_models import CallAnnotation, RevisionSave
 from app.db.control import RevisionConflict
 from app.models import ContextPacket, PreparePhoneCallInput
 from app.voice_preview import PreviewUnavailable
+from app.workflow_models import FollowupUpdate, OutcomeWrite
 
 router = APIRouter(prefix="/admin/api", tags=["control"])
 
@@ -96,6 +97,18 @@ async def voice_preview(
     )
 
 
+@router.get("/costs")
+async def costs(
+    month: str = Query(pattern=r"^\d{4}-\d{2}$"),
+    offset: int = Query(0, ge=0, le=100000),
+    control: ControlPlane = Depends(require_control),
+) -> dict[str, Any]:
+    try:
+        return await control.spending.monthly(month, offset)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 @router.get("/profiles")
 async def profiles(control: ControlPlane = Depends(require_control)) -> list[dict[str, Any]]:
     return await control.profiles(archived=True)
@@ -138,6 +151,39 @@ async def save(
         raise HTTPException(422, str(exc)) from exc
 
 
+@router.post("/checks")
+async def start_check(
+    body: PracticeInput, control: ControlPlane = Depends(require_control)
+) -> dict[str, Any]:
+    try:
+        return await control.checks.start(body.context, body.overrides)
+    except (ValueError, LookupError) as exc:
+        raise HTTPException(409 if "active" in str(exc) else 422, str(exc)) from exc
+
+
+@router.get("/checks")
+async def recent_checks(
+    profile_id: str, control: ControlPlane = Depends(require_control)
+) -> dict[str, Any]:
+    return await control.checks.recent(profile_id)
+
+
+@router.get("/checks/{check_id}")
+async def get_check(
+    check_id: str, control: ControlPlane = Depends(require_control)
+) -> dict[str, Any]:
+    try:
+        return await control.checks.get(check_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.delete("/checks/{check_id}", status_code=204)
+async def cancel_check(check_id: str, control: ControlPlane = Depends(require_control)) -> Response:
+    await control.checks.cancel(check_id)
+    return Response(status_code=204)
+
+
 @router.post("/prompt-preview")
 async def preview(
     body: PracticeInput, control: ControlPlane = Depends(require_control)
@@ -160,6 +206,7 @@ async def preview(
 async def calls(
     q: str = "",
     state: str = "",
+    outcome: str = "",
     language: str = "",
     profile: str = "",
     start: str = "",
@@ -172,6 +219,7 @@ async def calls(
         return await control.calls(
             query=q,
             state=state,
+            outcome=outcome,
             language=language,
             profile=profile,
             start=start,
@@ -203,6 +251,73 @@ async def detail(
         return await control.detail(call_id, after)
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
+
+
+@router.get("/calls/{call_id}/outcome")
+async def outcome(call_id: str, control: ControlPlane = Depends(require_control)) -> dict[str, Any]:
+    try:
+        await control.workflows._call(call_id)
+        return {
+            "assessment": await control.workflows.assessment(call_id),
+            "followups": (await control.workflows.list_followups(status="all", call_id=call_id))[
+                "followups"
+            ],
+        }
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.put("/calls/{call_id}/outcome")
+async def save_outcome(
+    call_id: str, body: OutcomeWrite, control: ControlPlane = Depends(require_control)
+) -> dict[str, Any]:
+    try:
+        return await control.workflows.save_outcome(call_id, body, "owner")
+    except RevisionConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.get("/followups")
+async def followups(
+    status: str = "open",
+    call_id: str | None = None,
+    offset: int = Query(0, ge=0, le=100000),
+    control: ControlPlane = Depends(require_control),
+) -> dict[str, Any]:
+    try:
+        return await control.workflows.list_followups(status=status, call_id=call_id, offset=offset)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.get("/followups/{followup_id}/brief")
+async def followup_brief(
+    followup_id: str, control: ControlPlane = Depends(require_control)
+) -> dict[str, Any]:
+    try:
+        return await control.workflows.callback_brief(followup_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.put("/followups/{followup_id}")
+async def update_followup(
+    followup_id: str, body: FollowupUpdate, control: ControlPlane = Depends(require_control)
+) -> dict[str, Any]:
+    try:
+        return await control.workflows.update_followup(followup_id, body, "owner")
+    except RevisionConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.get("/calls/{call_id}/ai-inputs")
