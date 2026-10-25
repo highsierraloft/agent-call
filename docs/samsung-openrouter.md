@@ -60,6 +60,8 @@ Contact search and creation controls share a height and baseline. Forms own thei
 the shared field-group style does not reset it. Costs and callback views use one bounded content
 column, with filters and actions in a compact toolbar. Costs keeps unknown usage explicit without
 repeating scope disclaimers or a second call-list heading.
+Narrow editors place Save below the title. Picker buttons match their field height, and the temperature
+switch has a separate header row so its touch area cannot overlap the input.
 
 Settings separates Business, Voice & Models, and Memory; Outbound separates Instructions from
 Automatic Callbacks. Inbound intake limits and additional callback rules use labelled disclosures.

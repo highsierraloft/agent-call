@@ -560,10 +560,12 @@
       font-size: 0.9286rem;
     }
     .editor-heading {
+      display: flex;
       flex-direction: column;
       align-items: stretch;
     }
     .editor-save {
+      display: flex;
       align-self: flex-start;
       flex-wrap: wrap;
     }
@@ -671,6 +673,11 @@
     .profile-list .section-heading {
       order: 2;
       margin: 0;
+    }
+    .profile-picker select,
+    .profile-list .section-heading .icon-button {
+      height: max(44px, var(--control-height));
+      min-height: max(44px, var(--control-height));
     }
     .configuration-editor {
       padding: 20px;

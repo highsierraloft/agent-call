@@ -823,18 +823,25 @@
     width: 100%;
   }
   .temperature-field {
-    position: relative;
+    margin-bottom: 18px;
   }
-  .temperature-field > .check {
-    position: absolute;
-    top: 0;
-    right: 0;
+  .temperature-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+  .temperature-heading > label {
     margin: 0;
+  }
+  .temperature-heading > .check {
     min-height: 21px;
     font-size: 0.8571rem;
   }
-  .temperature-field > label:not(.check) {
-    padding-top: 0;
+  .temperature-field > small {
+    display: block;
+    margin-top: 6px;
   }
   .voice-fields h4 {
     margin: 24px 0 12px;

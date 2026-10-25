@@ -336,3 +336,55 @@ test("call workspace keeps readable spacing across every detail tab", async ({
     await capture(page, info, "call-" + name.toLowerCase());
   }
 });
+
+test("phone editors stack headings and keep switches and picker buttons aligned", async ({
+  page,
+}, info) => {
+  test.setTimeout(60000);
+  await setup(page, info);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/settings");
+  await page
+    .getByRole("tablist", { name: "Workspace settings" })
+    .getByRole("tab", { name: "Voice & Models", exact: true })
+    .click();
+  await expect(
+    page.getByRole("combobox", { name: "OpenRouter model", exact: true }),
+  ).toBeVisible();
+  const heading = await page
+    .locator(".revision-form .editor-title")
+    .boundingBox();
+  const save = await page.locator(".revision-form .editor-save").boundingBox();
+  expect(save!.y - heading!.y - heading!.height).toBeGreaterThanOrEqual(8);
+  await capture(page, info, "phone-editor-heading");
+  await page
+    .locator(".settings-disclosure > summary")
+    .filter({ hasText: "Response Controls" })
+    .click();
+  await page
+    .getByRole("spinbutton", { name: "Temperature", exact: true })
+    .scrollIntoViewIfNeeded();
+  const toggle = await page
+    .getByRole("checkbox", { name: "Apply temperature", exact: true })
+    .boundingBox();
+  const input = await page
+    .getByRole("spinbutton", { name: "Temperature", exact: true })
+    .boundingBox();
+  expect(input!.y - toggle!.y - toggle!.height).toBeGreaterThanOrEqual(6);
+  await capture(page, info, "phone-temperature");
+  await nav(page, "Personalities");
+  await expect(page.locator(".profile-picker select")).toBeVisible();
+  const aligned = await page.locator(".profile-list").evaluate((el) => {
+    const picker = el
+      .querySelector(".profile-picker select")!
+      .getBoundingClientRect();
+    const add = el.querySelector(".icon-button")!.getBoundingClientRect();
+    return {
+      top: Math.abs(picker.y - add.y),
+      height: Math.abs(picker.height - add.height),
+    };
+  });
+  expect(aligned.top).toBeLessThanOrEqual(1);
+  expect(aligned.height).toBeLessThanOrEqual(1);
+  await capture(page, info, "phone-profile-picker");
+});

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import VoicePreview from "./VoicePreview";
 import { api, message } from "./api";
 import { SettingsDisclosure } from "./Controls";
@@ -79,6 +79,7 @@ export default function VoiceFields({
   practice?: boolean;
   section?: "voice" | "call" | "all";
 }) {
+  const temperatureId = useId();
   const [catalog, setCatalog] = useState<Catalog | null>(cached?.value ?? null);
   const [loading, setLoading] = useState(!cached),
     [error, setError] = useState("");
@@ -275,51 +276,52 @@ export default function VoiceFields({
                 </small>
               </label>
               <div className="temperature-field">
-                <label className="check">
-                  <input
-                    type="checkbox"
-                    aria-label="Apply temperature"
-                    disabled={!temperatureSupported}
-                    checked={
-                      temperatureSupported &&
-                      effective.dialogue_temperature !== null
-                    }
-                    onChange={(e) =>
-                      change(
-                        "dialogue_temperature",
-                        e.target.checked ? 0.4 : null,
-                      )
-                    }
-                  />
-                  Apply
-                </label>
-                <label>
-                  Temperature
-                  <input
-                    aria-label="Temperature"
-                    type="number"
-                    min="0"
-                    max="2"
-                    step="0.1"
-                    disabled={
-                      !temperatureSupported ||
-                      effective.dialogue_temperature === null
-                    }
-                    value={effective.dialogue_temperature ?? ""}
-                    onChange={(e) =>
-                      change(
-                        "dialogue_temperature",
-                        e.target.value === "" ? null : Number(e.target.value),
-                      )
-                    }
-                  />
-                  {reset("dialogue_temperature")}
-                  <small>
-                    {!temperatureSupported
-                      ? "Not supported by this model. Omitted from requests."
-                      : "Off omits temperature and uses the provider default."}
-                  </small>
-                </label>
+                <div className="temperature-heading">
+                  <label htmlFor={temperatureId}>Temperature</label>
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      aria-label="Apply temperature"
+                      disabled={!temperatureSupported}
+                      checked={
+                        temperatureSupported &&
+                        effective.dialogue_temperature !== null
+                      }
+                      onChange={(e) =>
+                        change(
+                          "dialogue_temperature",
+                          e.target.checked ? 0.4 : null,
+                        )
+                      }
+                    />
+                    Apply
+                  </label>
+                </div>
+                <input
+                  id={temperatureId}
+                  aria-label="Temperature"
+                  type="number"
+                  min="0"
+                  max="2"
+                  step="0.1"
+                  disabled={
+                    !temperatureSupported ||
+                    effective.dialogue_temperature === null
+                  }
+                  value={effective.dialogue_temperature ?? ""}
+                  onChange={(e) =>
+                    change(
+                      "dialogue_temperature",
+                      e.target.value === "" ? null : Number(e.target.value),
+                    )
+                  }
+                />
+                {reset("dialogue_temperature")}
+                <small>
+                  {!temperatureSupported
+                    ? "Not supported by this model. Omitted from requests."
+                    : "Off omits temperature and uses the provider default."}
+                </small>
               </div>
             </div>
             {invalidReasoning && (
