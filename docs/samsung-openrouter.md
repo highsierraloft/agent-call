@@ -44,12 +44,18 @@ Its React interface is built with `dashboard/package-lock.json` and served by `D
 Administration APIs remain inside the existing FastAPI worker.
 
 The grouped sidebar separates Activity (Calls, Contacts, Callbacks, Costs), Agent (Inbound,
-Outbound, Personalities), and Workspace (Playground, Hermes, Settings). Compact screens use a
-labelled Menu drawer. End Call remains available across views while a call is active.
+Outbound, Personalities), and Workspace (Playground, Hermes, Settings). Collapse it to an icon
+rail or expand it for labels. The browser remembers this choice across visits and shares it
+between tabs. On phones, expansion overlays the workspace; Escape or selecting a destination
+closes it. End Call remains available across views, including inside expanded phone navigation.
 Contacts separates Conversations, Memory, and Details. Contact and memory drafts survive tab
 changes; leaving the contact asks before discarding unsaved changes, including browser history
 navigation. Reloading or closing the page invokes the browser's unsaved-change warning.
-Callbacks separates Scheduled from Unscheduled Follow-ups.
+The compact contact list scrolls separately and shows each name and primary number. Conversation
+rows open the original call, transcript, and recording. Their action menu contains Hermes review.
+Missing summaries add no placeholder paragraph; actual summaries and review status remain visible.
+Dates use the workspace timezone. Empty views use a single padded state label.
+Callbacks separates Scheduled from Follow-ups.
 
 Settings separates Business, Voice & Models, and Memory; Outbound separates Instructions from
 Automatic Callbacks. Inbound intake limits and additional callback rules use labelled disclosures.
@@ -67,11 +73,14 @@ available. The interface preserves its Apple-style hierarchy and system font sta
 surfaces, blue accents, restrained dividers, and light or dark appearance from the device setting.
 Semantic HTML controls, labelled fields, visible keyboard focus, and progressive disclosure keep
 routine actions clear while retaining detailed settings and inspection tools.
+Short transitions show sidebar and pane changes. The device's reduced-motion setting disables them.
+Controls retain touch targets on phones; content adapts to the remaining workspace width and enlarged text.
 
 Saving creates an immutable revision and applies it to future preparations. Existing plans and
 active calls retain their stored settings snapshots. Contact and memory saves also leave existing
 call snapshots unchanged. Restoration creates another revision.
 Concurrent saves use the expected revision and return a conflict instead of overwriting another edit.
+Configuration fields pause editing while a save is in progress, so its response cannot overwrite a later edit.
 Built-in profile IDs remain available for older clients; custom profiles can be archived.
 
 `ContextPacket.profile_id` is optional. `get_calling_setup` supplies the current calling guide,

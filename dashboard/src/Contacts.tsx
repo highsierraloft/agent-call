@@ -1,14 +1,24 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Plus, Search, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowDownLeft,
+  ArrowUpRight,
+  ChevronRight,
+  Plus,
+  Search,
+  Trash2,
+} from "lucide-react";
 import { api, message } from "./api";
-import { SectionTabs, SettingsDisclosure } from "./Controls";
+import { ActionMenu, SectionTabs, SettingsDisclosure } from "./Controls";
 import type { Contact, MemoryFact } from "./types";
 
 export default function Contacts({
   selected,
   navigate,
+  timezone,
 }: {
   selected?: string;
+  timezone: string;
   navigate: (path: string) => void;
 }) {
   const [query, setQuery] = useState(""),
@@ -70,7 +80,7 @@ export default function Contacts({
             <Search size={16} />
             <input
               aria-label="Search contacts"
-              placeholder="Name, company, or number"
+              placeholder="Search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -83,7 +93,7 @@ export default function Contacts({
             <Plus size={18} />
           </button>
         </div>
-        {loading && (
+        {loading && !rows.length && (
           <p className="inset muted" role="status">
             Loading contacts…
           </p>
@@ -95,30 +105,26 @@ export default function Contacts({
         )}
         {!loading && !rows.length && (
           <p className="inset muted">
-            {query
-              ? "No matching contacts."
-              : "Contacts appear here as calls are linked. You can also add one."}
+            {query ? "No matching contacts." : "No contacts"}
           </p>
         )}
-        <ul className="contact-rows">
+        <ul className="contact-rows" aria-busy={loading}>
           {rows.map((row) => (
             <li key={row.contact_id}>
               <a
                 className={selected === row.contact_id ? "selected" : ""}
                 href={"/contacts/" + row.contact_id}
+                aria-current={selected === row.contact_id ? "true" : undefined}
+                title={[row.name, ...row.numbers.map((n) => n.phone)]
+                  .filter(Boolean)
+                  .join(" · ")}
                 onClick={(e) => {
                   e.preventDefault();
                   navigate("/contacts/" + row.contact_id);
                 }}
               >
-                <strong>
-                  {row.name || row.numbers[0]?.phone || "Unknown caller"}
-                </strong>
-                <span>
-                  {row.numbers.map((n) => n.phone).join(" · ") ||
-                    "Number not available"}
-                </span>
-                <small>{row.call_count || 0} related calls</small>
+                <strong>{row.name || "Unknown caller"}</strong>
+                <span>{row.numbers[0]?.phone || "No number"}</span>
               </a>
             </li>
           ))}
@@ -134,20 +140,13 @@ export default function Contacts({
           <ContactDetail
             key={selected}
             id={selected}
+            timezone={timezone}
             navigate={navigate}
             onSaved={() => setRefresh((x) => x + 1)}
           />
         ) : (
           <div className="empty-detail">
-            <h2>Contact memory and history</h2>
-            <p>
-              Select a contact to review conversations, edit memory, or follow
-              up.
-            </p>
-            <p className="muted">
-              Phone numbers help recognize callers. A shared number does not
-              prove who is speaking.
-            </p>
+            <p>Select a contact</p>
           </div>
         )}
       </section>
@@ -159,8 +158,10 @@ function ContactDetail({
   id,
   navigate,
   onSaved,
+  timezone,
 }: {
   id: string;
+  timezone: string;
   navigate: (path: string) => void;
   onSaved: () => void;
 }) {
@@ -269,7 +270,7 @@ function ContactDetail({
           navigate("/contacts/" + row.contact_id);
         }
       }
-      setNotice("Saved. Existing call snapshots stay unchanged.");
+      setNotice("Saved");
       onSaved();
     } catch (e) {
       setError(message(e));
@@ -287,9 +288,7 @@ function ContactDetail({
           ? { ...old, calls: next.calls, next_offset: next.next_offset }
           : next,
       );
-      setNotice(
-        "Queued for Hermes. The summary and memory will appear after review.",
-      );
+      setNotice("Review queued");
     } catch (e) {
       setError(message(e));
     } finally {
@@ -351,48 +350,80 @@ function ContactDetail({
         >
           {section === "history" ? (
             <div className="contact-history">
-              <p className="muted">
-                Original recordings and full transcripts stay with each call.
-              </p>
-              {!contact?.calls.length && <p>No linked calls yet.</p>}
-              {contact?.calls.map((call) => (
-                <article className="timeline-call" key={call.call_id}>
-                  <div className="section-heading">
-                    <strong>
-                      {call.direction === "inbound" ? "Incoming" : "Outgoing"}{" "}
-                      call
-                    </strong>
-                    <time>{new Date(call.created_at).toLocaleString()}</time>
-                  </div>
-                  <p>
-                    {call.summary?.text ||
-                      (call.review_state === "pending" ||
-                      call.review_state === "leased"
-                        ? "Hermes review pending."
-                        : "No summary recorded.")}
-                  </p>
-                  <small className="muted">
-                    {call.summary?.outcome || call.state}
-                  </small>
-                  <div className="save-row">
-                    <button onClick={() => navigate("/calls/" + call.call_id)}>
-                      Open Transcript & Recording
-                    </button>
-                    {!["pending", "leased"].includes(
-                      call.review_state || "",
-                    ) && (
-                      <button
-                        disabled={busy}
-                        onClick={() => review(call.call_id)}
+              {!contact?.calls.length && (
+                <div className="empty-state">No calls yet</div>
+              )}
+              {contact?.calls.map((call) => {
+                const incoming = call.direction === "inbound";
+                const pending = ["pending", "leased"].includes(
+                  call.review_state || "",
+                );
+                const stamp = new Intl.DateTimeFormat("en-GB", {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                  timeZone: timezone,
+                }).format(new Date(call.created_at));
+                const state = pending
+                  ? "Review pending"
+                  : (call.summary?.outcome || call.state).replaceAll("_", " ");
+                return (
+                  <article className="timeline-call" key={call.call_id}>
+                    <a
+                      className="conversation-link"
+                      href={"/calls/" + call.call_id}
+                      aria-label={`Open ${incoming ? "incoming" : "outgoing"} call from ${stamp}`}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        navigate("/calls/" + call.call_id);
+                      }}
+                    >
+                      <span className="conversation-meta">
+                        <span className="conversation-direction">
+                          {incoming ? (
+                            <ArrowDownLeft size={15} />
+                          ) : (
+                            <ArrowUpRight size={15} />
+                          )}
+                          {incoming ? "Incoming" : "Outgoing"}
+                        </span>
+                        <time dateTime={call.created_at}>{stamp}</time>
+                      </span>
+                      <span
+                        className={
+                          "conversation-status " +
+                          (["failed", "timed_out"].includes(call.state)
+                            ? "issue"
+                            : "")
+                        }
                       >
-                        {call.review_state
-                          ? "Review Again with Hermes"
-                          : "Review with Hermes"}
-                      </button>
+                        {state}
+                      </span>
+                      {call.summary?.text && (
+                        <p className="conversation-summary">
+                          {call.summary.text}
+                        </p>
+                      )}
+                      <ChevronRight
+                        size={16}
+                        className="conversation-chevron"
+                        aria-hidden="true"
+                      />
+                    </a>
+                    {!pending && (
+                      <ActionMenu label="Call actions" iconOnly>
+                        <button
+                          disabled={busy}
+                          onClick={() => review(call.call_id)}
+                        >
+                          {call.review_state
+                            ? "Review Again with Hermes"
+                            : "Review with Hermes"}
+                        </button>
+                      </ActionMenu>
                     )}
-                  </div>
-                </article>
-              ))}
+                  </article>
+                );
+              })}
               {contact?.next_offset !== null &&
                 contact?.next_offset !== undefined && (
                   <button onClick={more}>Load Earlier Calls</button>
@@ -419,11 +450,9 @@ function ContactDetail({
             </div>
           ) : section === "memory" ? (
             <div className="form-section contact-form">
-              <p className="muted">
-                Reusable facts for future conversations. Saving your corrections
-                protects these facts from automatic changes. Removed facts
-                cannot be revived by reviewing the same evidence.
-              </p>
+              {!facts.length && (
+                <div className="empty-state">No saved memory</div>
+              )}
               {facts.map((fact, index) => (
                 <div className="memory-fact" key={fact.key}>
                   <label>
@@ -462,6 +491,9 @@ function ContactDetail({
                   )}
                 </div>
               ))}
+              <p className="field-help">
+                Your corrections take priority over automatic reviews.
+              </p>
               <div className="save-row">
                 <button
                   disabled={facts.length >= 40}
@@ -505,10 +537,7 @@ function ContactDetail({
                   onChange={(e) => setBackground(e.target.value)}
                 />
               </label>
-              <p className="field-help">
-                Relevant context the agent may use. This is not permission to
-                disclose sensitive history.
-              </p>
+              <p className="field-help">Used as conversation context.</p>
               <label>
                 Phone numbers
                 <textarea
@@ -518,10 +547,6 @@ function ContactDetail({
                   placeholder="One international number per line"
                 />
               </label>
-              <p className="field-help">
-                A number may belong to more than one person. Saving it here does
-                not merge contacts.
-              </p>
               <SettingsDisclosure
                 title="Private owner notes"
                 summary="Excluded from calls and Hermes reviews"

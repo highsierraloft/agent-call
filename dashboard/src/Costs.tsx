@@ -165,8 +165,7 @@ export default function Costs({
     <section className="workflow-page" aria-label="Call costs">
       <div className="section-heading">
         <div>
-          <h2>Costs</h2>
-          <p className="muted">Estimates from recorded telephone usage.</p>
+          <h2>Recorded usage</h2>
         </div>
         <label>
           Month

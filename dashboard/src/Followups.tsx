@@ -73,9 +73,6 @@ export default function Followups({
       <div className="section-heading">
         <div>
           <h2>Follow-ups</h2>
-          <p className="muted">
-            Callback promises and the information needed to finish them.
-          </p>
         </div>
         <button onClick={() => load()} disabled={loading}>
           Refresh
@@ -106,13 +103,7 @@ export default function Followups({
       )}
       {loading && !rows.length && <p role="status">Loading follow-ups…</p>}
       {!loading && !rows.length && (
-        <div className="empty">
-          <h3>No follow-ups here</h3>
-          <p>
-            Hermes can record callback promises from a call. You can also add
-            one in the call’s Outcome tab.
-          </p>
-        </div>
+        <div className="empty-state">No follow-ups</div>
       )}
       <div className="followup-list">
         {rows.map((row) => (

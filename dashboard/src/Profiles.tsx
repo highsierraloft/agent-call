@@ -117,10 +117,6 @@ export default function Profiles({
             </optgroup>
           </select>
         </label>
-        <p className="muted inset">
-          Speaking style for incoming and outgoing calls. Shared voices and
-          models are in Settings.
-        </p>
         {profiles.map((p) => (
           <button
             className={"profile-row " + (p.entity === entity ? "selected" : "")}
@@ -366,13 +362,9 @@ export function ConfigurationEditor({
                 {record.revision ? "Version " + record.revision : "New"}
               </span>
             </div>
-            <p className="muted">
-              {entity === "guide"
-                ? "Hermes uses this guide for its next call."
-                : entity === "global"
-                  ? "Shared defaults for future calls."
-                  : "Changes apply to future calls."}
-            </p>
+            {entity === "guide" && (
+              <p className="caption muted">Instructions for Hermes</p>
+            )}
           </div>
           <div className="editor-save">
             {dirty && <span className="change-label">Unsaved changes</span>}
@@ -574,13 +566,11 @@ export function ConfigurationEditor({
               )
             ) : (
               <>
-                <p className="section-intro muted">
-                  {entity === "global"
-                    ? section === "voice"
-                      ? "Choose how the agent thinks and sounds."
-                      : "Set languages, speech recognition, and call limits."
-                    : "Uses global defaults unless you override a setting here."}
-                </p>
+                {entity !== "global" && (
+                  <p className="caption muted">
+                    Inherits Settings defaults unless overridden.
+                  </p>
+                )}
                 <VoiceFields
                   section={section as "voice" | "call"}
                   value={
@@ -619,10 +609,6 @@ function GlobalFields({
   return (
     <>
       <section className="form-section">
-        <p className="section-intro muted">
-          The call AI combines these instructions with the chosen personality
-          recipient, and task.
-        </p>
         <label>
           Global Instructions
           <textarea

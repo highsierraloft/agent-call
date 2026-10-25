@@ -85,7 +85,7 @@ export default function Callbacks({
         onChange={setTab}
         items={[
           { id: "scheduled", label: "Scheduled" },
-          { id: "manual", label: "Unscheduled Follow-ups" },
+          { id: "manual", label: "Follow-ups" },
         ]}
       >
         {tab === "manual" ? (
@@ -95,10 +95,6 @@ export default function Callbacks({
             <header className="section-heading">
               <div>
                 <h2>Scheduled callbacks</h2>
-                <p className="muted">
-                  One automatic attempt within the confirmed window. A saved
-                  schedule is not a completed conversation.
-                </p>
               </div>
               <button onClick={() => setEditing("new")}>
                 Schedule Callback
@@ -144,10 +140,8 @@ export default function Callbacks({
               />
             )}
             {!rows.length && (
-              <p className="empty-message">
-                {busy
-                  ? "Loading callbacks…"
-                  : "No callbacks in this view. Verbal promises remain in Unscheduled Follow-ups until the details are confirmed."}
+              <p className="empty-state">
+                {busy ? "Loading callbacks…" : "No callbacks"}
               </p>
             )}
             <div className="schedule-list">

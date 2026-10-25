@@ -5,8 +5,6 @@ import {
   ChevronRight,
   Download,
   FileText,
-  Phone,
-  ArrowUpRight,
   Square,
   RefreshCw,
 } from "lucide-react";
@@ -343,18 +341,10 @@ export default function Calls({
           ))}
         </div>
         {!loading && !calls.length && (
-          <div className="empty small">
-            <Search size={25} />
-            <h2>
-              {q || state || language || start || end
-                ? "No matching calls"
-                : "No calls yet"}
-            </h2>
-            <p>
-              {q || state || language || start || end
-                ? "Try a different search or clear the filters."
-                : "Start a call here or ask Hermes. Recordings and transcripts will appear here."}
-            </p>
+          <div className="empty-state">
+            {q || state || language || start || end
+              ? "No matching calls"
+              : "No calls yet"}
           </div>
         )}
         {cursor && (
@@ -377,20 +367,7 @@ export default function Calls({
           onFollowups={() => navigate("/calls/followups")}
         />
       ) : (
-        <section className="empty call-welcome">
-          <div className="empty-symbol">
-            <Phone size={30} />
-          </div>
-          <h2>Your conversations, together.</h2>
-          <p>
-            Select a call to listen, read the transcript,
-            <br />
-            and see the settings that shaped it.
-          </p>
-          <button onClick={() => onNew()}>
-            Start a Call <ArrowUpRight size={16} />
-          </button>
-        </section>
+        <section className="empty-state call-welcome">Select a call</section>
       )}
     </div>
   );

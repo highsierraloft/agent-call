@@ -19,8 +19,6 @@ async function action(page: Page, name: string, menu = "More") {
 }
 async function navigation(page: Page, label: string) {
   await page.locator(".sidebar").waitFor({ state: "attached" });
-  const menu = page.getByRole("button", { name: "Menu", exact: true });
-  if (await menu.isVisible()) await menu.click();
   await page.getByRole("link", { name: label, exact: true }).click();
 }
 async function globalDefaults(page: Page) {
@@ -304,7 +302,7 @@ test("compact layout and keyboard focus remain usable at a narrow zoom-equivalen
   await page.setViewportSize({ width: 640, height: 900 });
   await page.goto("/calls");
   await expect(
-    page.getByRole("button", { name: "Menu", exact: true }),
+    page.getByRole("button", { name: "Expand sidebar", exact: true }),
   ).toBeVisible();
   await page.keyboard.press("Tab");
   await expect(page.locator(":focus")).toBeVisible();

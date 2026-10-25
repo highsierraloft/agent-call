@@ -6,14 +6,12 @@ import { ActionMenu } from "./Controls";
 export default function RevisionForm<T extends object>({
   entity,
   title,
-  description,
   children,
   onSaved,
   onDirtyChange,
 }: {
   entity: string;
   title: string;
-  description: string;
   children: (value: T, change: (value: T) => void) => ReactNode;
   onSaved?: () => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
@@ -76,9 +74,7 @@ export default function RevisionForm<T extends object>({
       setRaw(null);
       setHistory(null);
       setConflict(false);
-      setNotice(
-        "Saved for future calls. Prepared and active calls keep their settings.",
-      );
+      setNotice("Saved for future calls");
       await onSaved?.();
     } catch (e) {
       setError(message(e));
@@ -97,12 +93,12 @@ export default function RevisionForm<T extends object>({
               <span className="version-label">Version {record.revision}</span>
             )}
           </div>
-          <p className="muted">{description}</p>
         </div>
         <div className="editor-save">
           {dirty && <span className="change-label">Unsaved changes</span>}
           <button
             className={dirty ? "primary" : ""}
+            title="Applies to future calls; existing calls keep their settings."
             disabled={!dirty || busy}
             onClick={() => save()}
           >
@@ -218,22 +214,24 @@ export default function RevisionForm<T extends object>({
           Review My Edits Against Latest Version
         </button>
       )}
-      {!value ? (
-        <p role="status">Loading settings…</p>
-      ) : raw !== null ? (
-        <label>
-          Configuration JSON
-          <textarea
-            className="raw-editor"
-            rows={18}
-            value={raw}
-            onChange={(e) => setRaw(e.target.value)}
-            spellCheck={false}
-          />
-        </label>
-      ) : (
-        children(value, setValue)
-      )}
+      <fieldset className="editor-fields" disabled={busy}>
+        {!value ? (
+          <p role="status">Loading settings…</p>
+        ) : raw !== null ? (
+          <label>
+            Configuration JSON
+            <textarea
+              className="raw-editor"
+              rows={18}
+              value={raw}
+              onChange={(e) => setRaw(e.target.value)}
+              spellCheck={false}
+            />
+          </label>
+        ) : (
+          children(value, setValue)
+        )}
+      </fieldset>
       {history && (
         <section className="history-panel">
           <div className="section-heading">

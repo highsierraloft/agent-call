@@ -4,14 +4,7 @@ import {
   WebSocketTransport,
   WavMediaManager,
 } from "@pipecat-ai/websocket-transport";
-import {
-  AudioLines,
-  Mic,
-  Square,
-  Send,
-  MessageSquare,
-  FileText,
-} from "lucide-react";
+import { Mic, Square, Send, MessageSquare, FileText } from "lucide-react";
 import { api, message } from "./api";
 import AIInputs from "./AIInputs";
 import VoiceFields from "./VoiceFields";
@@ -349,10 +342,7 @@ export default function Playground({
   return (
     <div className="playground-layout">
       <aside className="practice-setup">
-        <h2>Practice Setup</h2>
-        <p className="muted">
-          Try your agent with voice or text. No phone call is placed.
-        </p>
+        <h2>Practice</h2>
         {draft && (
           <div className="draft-notice">
             <strong>Testing unsaved changes</strong>
@@ -626,14 +616,12 @@ export default function Playground({
               ))}
               {partial && <p className="partial">{partial}</p>}
               {!practice?.messages.length && (
-                <div className="empty">
-                  <AudioLines size={42} />
-                  <h3>{running ? "Say hello." : "Ready when you are."}</h3>
-                  <p>
-                    {running
-                      ? "Speak naturally. Try an interruption or a language switch."
-                      : "Start practice to hear the agent and read the conversation here."}
-                  </p>
+                <div className="empty-state">
+                  {running
+                    ? mode === "voice"
+                      ? "Listening…"
+                      : "Send a message to begin"
+                    : "Start a practice session"}
                 </div>
               )}
             </div>

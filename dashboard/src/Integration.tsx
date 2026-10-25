@@ -28,11 +28,6 @@ export default function Integration({
   return (
     <div className="integration-page">
       <header className="integration-heading">
-        <p className="muted">
-          Hermes gathers the brief and returns the recording and transcript.
-          <br />
-          Edit the speaking agent in Personalities.
-        </p>
         <a
           className="button"
           href={session.hermes_url}
@@ -105,12 +100,8 @@ export default function Integration({
           id="integration-panel-tools"
           aria-labelledby="integration-tab-tools"
         >
-          <h3>Tools offered to Hermes by the calling server</h3>
-          <p className="muted">
-            These live descriptions define what Hermes can request. Hermes’s
-            settings control which tools are enabled, including compatibility
-            tools.
-          </p>
+          <h3>Available tools</h3>
+          <p className="muted">Enabled tools are selected in Hermes.</p>
           {data?.tools.map((tool) => (
             <details className="tool-row" key={tool.name}>
               <summary>
@@ -152,14 +143,8 @@ export default function Integration({
               : "No request recorded yet"}
           </p>
           <p>
-            The calling guide goes to Hermes. The voice agent receives the
-            instructions from Global Defaults, the selected personality, and the
-            approved brief. Inspect AI Inputs in Personalities shows that
-            combined prompt.
-          </p>
-          <p>
-            Your existing Hermes instance uses the private calling-agent MCP
-            connection. It keeps its current account and model.
+            The calling guide goes to Hermes. Inspect AI Inputs in Personalities
+            shows the voice agent’s prompt.
           </p>
           <ol>
             <li>
@@ -182,11 +167,7 @@ export default function Integration({
               and MP3 using their native file paths.
             </li>
           </ol>
-          <p>
-            Save calling-specific guidance in the Calling Guide tab. Use
-            Hermes’s dashboard for its own model, account, tools, and other
-            tasks.
-          </p>
+
           <details>
             <summary>Private connection template</summary>
             <pre>

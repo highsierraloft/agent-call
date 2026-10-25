@@ -49,7 +49,6 @@ export function WorkspaceSettings({
           <RevisionForm<Voice>
             entity="voice_defaults"
             title="Shared voice and model defaults"
-            description="Used for inbound and outbound calls unless a personality overrides them."
             onSaved={onSaved}
             onDirtyChange={setDirty}
           >
@@ -78,11 +77,6 @@ export function WorkspaceSettings({
             entity="business"
             title={
               section === "business" ? "Business information" : "Memory review"
-            }
-            description={
-              section === "business"
-                ? "Approved information for reception. Personal outbound calls keep their own brief."
-                : "Hermes reviews finished calls locally. Conversations use the latest committed memory while a review is pending."
             }
             onSaved={onSaved}
             onDirtyChange={setDirty}
@@ -200,7 +194,6 @@ export function OutboundSettings({
           <RevisionForm<Global["prompts"]>
             entity="outbound"
             title="Outbound instructions"
-            description="The existing shared conversation and opening instructions. The approved task and recipient stay specific to each call."
             onSaved={onSaved}
             onDirtyChange={setDirty}
           >
@@ -233,7 +226,6 @@ export function OutboundSettings({
           <RevisionForm<CallbackPolicy>
             entity="callback_policy"
             title="Automatic callback policy"
-            description="Applies to confirmed automatic callbacks. Calls you explicitly request through Hermes keep their normal controls."
             onSaved={onSaved}
             onDirtyChange={setDirty}
           >
@@ -394,7 +386,6 @@ export function InboundSettingsPage({
       <RevisionForm<InboundSettings>
         entity="inbound"
         title="Inbound reception"
-        description="Answers the Spanish DIGI line using the business information in Settings. Turning answering off leaves an answered conversation running."
         onSaved={onSaved}
       >
         {(value, change) => (
@@ -411,8 +402,7 @@ export function InboundSettingsPage({
             </label>
             {!ready?.business_configured && (
               <p className="field-help">
-                Complete business setup before enabling reception. The
-                controlled handset check is also required.
+                Add business details in Settings before enabling reception.
               </p>
             )}
             <label>

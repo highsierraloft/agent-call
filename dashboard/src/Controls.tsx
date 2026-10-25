@@ -52,9 +52,11 @@ export function SectionTabs({
 
 export function ActionMenu({
   label = "More",
+  iconOnly = false,
   children,
 }: {
   label?: string;
+  iconOnly?: boolean;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDetailsElement>(null);
@@ -78,9 +80,13 @@ export function ActionMenu({
         }
       }}
     >
-      <summary>
-        <MoreHorizontal size={17} />
-        {label}
+      <summary
+        className={iconOnly ? "icon-only" : undefined}
+        aria-label={label}
+        title={iconOnly ? label : undefined}
+      >
+        <MoreHorizontal size={17} aria-hidden="true" />
+        {!iconOnly && label}
       </summary>
       <div
         className="action-menu-items"
