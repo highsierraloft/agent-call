@@ -52,7 +52,7 @@ password={config["ari_password"]}
         "cdr.conf": "[general]\nenable=no\n",
         "cel.conf": "[general]\nenable=no\n",
         "rtp.conf": "[general]\nrtpstart=12000\nrtpend=12019\nstrictrtp=yes\n",
-        "extensions.conf": "[from-android]\nexten => _.,1,Hangup(21)\n",
+        "extensions.conf": "[from-android]\nexten => _.,1,Stasis(agent-call,inbound,${CALLERID(num-pres)})\nsame => n,Hangup(21)\n",
         "acl.conf": f"[phone-only]\ndeny=0.0.0.0/0\npermit={peer}/32\n",
         "pjsip.conf": f"""[global]
 type=global
@@ -72,6 +72,7 @@ context=from-android
 auth=android-auth
 aors=android
 identify_by=username
+trust_id_inbound=yes
 disallow=all
 allow=alaw,ulaw
 dtmf_mode=rfc4733

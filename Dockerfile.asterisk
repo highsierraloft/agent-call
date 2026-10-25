@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
 COPY --from=build /install/usr/ /usr/
 COPY --from=build /install/var/lib/asterisk/ /var/lib/asterisk/
 COPY deploy/asterisk/entrypoint.py /opt/agent-call/asterisk-entrypoint.py
+COPY deploy/asterisk/sounds/reception /var/lib/asterisk/sounds/reception
 USER 1000:1000
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 CMD ["python", "/opt/agent-call/asterisk-entrypoint.py"]

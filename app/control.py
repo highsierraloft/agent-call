@@ -15,10 +15,13 @@ from app.android_config import AndroidConfig
 from app.call_ai_inputs import Mode, describe_inputs
 from app.call_personalities import PERSONALITIES
 from app.call_spending import CallSpending
+from app.callbacks import Callbacks
 from app.configuration_checks import ConfigurationChecks
+from app.contact_memory import ContactMemory
 from app.control_models import (
     DEFAULT_CALLING_GUIDE,
     CallingGuide,
+    ConversationPrompts,
     GlobalConfiguration,
     ProfileConfiguration,
     VoiceSettings,
@@ -28,9 +31,9 @@ from app.errors import CallRefusal
 from app.model_capabilities import validate_reasoning
 from app.models import ContextPacket
 from app.provider_usage import PricingSettings
+from app.reception_models import BusinessSettings, CallbackPolicy, InboundSettings
 from app.voice_catalog import VoiceCatalog
 from app.voice_preview import VoicePreviews
-from app.voice_prompts import voice_instructions
 from app.workflows import CallWorkflows
 
 if TYPE_CHECKING:
@@ -46,6 +49,8 @@ class ControlPlane:
         self._seeded = False
         self.practice = Playground(self)
         self.workflows = CallWorkflows(self)
+        self.contacts = ContactMemory(self)
+        self.callbacks = Callbacks(self)
         self.spending = CallSpending(self)
         self.checks = ConfigurationChecks(self)
         self.catalog = VoiceCatalog(service.config, service._api_key)
@@ -67,6 +72,9 @@ class ControlPlane:
             )
             await self.db.control_seed("guide", {"text": DEFAULT_CALLING_GUIDE})
             await self.db.control_seed("pricing", PricingSettings().model_dump(mode="json"))
+            await self.db.control_seed("business", BusinessSettings().model_dump(mode="json"))
+            await self.db.control_seed("inbound", InboundSettings().model_dump(mode="json"))
+            await self.db.control_seed("callback_policy", CallbackPolicy().model_dump(mode="json"))
             for name, prompt in PERSONALITIES.items():
                 value = ProfileConfiguration.model_validate(
                     {
@@ -77,10 +85,16 @@ class ControlPlane:
                     }
                 )
                 await self.db.control_seed("profile:" + name, value.model_dump(mode="json"))
-            from app.control_migration import migrate_contract, migrate_workflow_guide
+            from app.control_migration import (
+                migrate_contract,
+                migrate_reception_guide,
+                migrate_workflow_guide,
+            )
 
             await migrate_contract(self.db)
             await migrate_workflow_guide(self.db)
+            await migrate_reception_guide(self.db)
+            await self.contacts.migrate_history()
             await self.db.execute(
                 "UPDATE configuration_checks SET state='interrupted',error='The service restarted before this check finished.' WHERE state IN ('running','stopping')"
             )
@@ -88,10 +102,22 @@ class ControlPlane:
 
     async def current(self, entity: str) -> dict[str, Any]:
         await self.initialize()
+        if entity in {"outbound", "voice_defaults"}:
+            row = await self.current("global")
+            return self.scoped_global(row, entity)
         value = await self.db.control_current(entity)
         if value is None:
             raise LookupError("Configuration not found")
         return value
+
+    @staticmethod
+    def scoped_global(row: dict[str, Any], entity: str) -> dict[str, Any]:
+        value = (
+            ConversationPrompts.model_validate(row["value"]["prompts"]).model_dump(mode="json")
+            if entity == "outbound"
+            else row["value"]["voice"]
+        )
+        return {**row, "entity": entity, "value": value}
 
     async def profiles(self, *, archived: bool = False) -> list[dict[str, Any]]:
         await self.initialize()
@@ -105,9 +131,15 @@ class ControlPlane:
         self, entity: str, value: dict[str, Any], expected: int, actor: str
     ) -> dict[str, Any]:
         await self.initialize()
+        if entity in {"outbound", "voice_defaults"}:
+            current = await self.current("global")
+            field = "prompts" if entity == "outbound" else "voice"
+            await self.save("global", {**current["value"], field: value}, expected, actor)
+            return await self.current(entity)
         if entity == "global":
             valid = GlobalConfiguration.model_validate(value)
             await self.validate_voice(valid.voice)
+            await self.validate_inbound_voice(global_voice=valid.voice)
             for profile in await self.profiles():
                 await self.validate_voice(
                     VoiceSettings.model_validate(
@@ -119,8 +151,41 @@ class ControlPlane:
             payload = PricingSettings.model_validate(value).model_dump(mode="json")
         elif entity == "guide":
             payload = CallingGuide.model_validate(value).model_dump(mode="json")
+        elif entity == "business":
+            business = BusinessSettings.model_validate(value)
+            inbound = await self.current("inbound")
+            if inbound["value"]["enabled"] and not business.configured:
+                raise ValueError("Turn inbound answering off before clearing business setup")
+            payload = business.model_dump(mode="json")
+        elif entity == "callback_policy":
+            payload = CallbackPolicy.model_validate(value).model_dump(mode="json")
+        elif entity == "inbound":
+            inbound_settings = InboundSettings.model_validate(value)
+            await self.validate_inbound_voice(inbound=inbound_settings)
+            profile = await self.current("profile:" + inbound_settings.profile_id)
+            if profile["value"]["archived"]:
+                raise ValueError("Choose an available personality")
+            if inbound_settings.enabled:
+                business = BusinessSettings.model_validate(
+                    (await self.current("business"))["value"]
+                )
+                if not business.configured:
+                    raise ValueError(
+                        "Supply the business name, description, and approved facts first"
+                    )
+                acceptance = await self.db.fetch_one(
+                    "SELECT value_json FROM reception_state WHERE name='handset_acceptance'"
+                )
+                if acceptance is None or not json.loads(acceptance["value_json"]).get("passed"):
+                    raise ValueError(
+                        "Complete the controlled DIGI handset acceptance before enabling inbound answering"
+                    )
+            payload = inbound_settings.model_dump(mode="json")
         elif re.fullmatch(r"profile:[a-z0-9][a-z0-9_-]{0,63}", entity):
             profile_value = ProfileConfiguration.model_validate(value)
+            await self.validate_inbound_voice(
+                profile=profile_value, profile_id=entity.removeprefix("profile:")
+            )
             global_value = (await self.current("global"))["value"]
             await self.validate_voice(
                 VoiceSettings.model_validate(
@@ -137,6 +202,33 @@ class ControlPlane:
         await self.db.control_save(entity, payload, expected, actor)
         return await self.current(entity)
 
+    async def validate_inbound_voice(
+        self,
+        *,
+        global_voice: VoiceSettings | None = None,
+        inbound: InboundSettings | None = None,
+        profile: ProfileConfiguration | None = None,
+        profile_id: str | None = None,
+    ) -> None:
+        reception = inbound or InboundSettings.model_validate(
+            (await self.current("inbound"))["value"]
+        )
+        if not reception.enabled or (profile_id and profile_id != reception.profile_id):
+            return
+        selected = profile or ProfileConfiguration.model_validate(
+            (await self.current("profile:" + reception.profile_id))["value"]
+        )
+        if selected.archived:
+            raise ValueError("Choose another inbound personality before archiving the selected one")
+        base = global_voice or VoiceSettings.model_validate(
+            (await self.current("global"))["value"]["voice"]
+        )
+        effective = VoiceSettings.model_validate({**base.model_dump(), **selected.voice_overrides})
+        if reception.language not in effective.conversation_languages:
+            raise ValueError(
+                "The inbound greeting language must be enabled in its personality's voice settings"
+            )
+
     async def validate_voice(self, voice: VoiceSettings) -> dict[str, Any]:
         model = await self.catalog.model(voice.dialogue_model)
         validate_reasoning(model, voice.reasoning_effort)
@@ -147,6 +239,10 @@ class ControlPlane:
 
     async def history(self, entity: str) -> list[dict[str, Any]]:
         await self.current(entity)
+        if entity in {"outbound", "voice_defaults"}:
+            return [
+                self.scoped_global(row, entity) for row in await self.db.control_history("global")
+            ]
         return await self.db.control_history(entity)
 
     async def resolve(
@@ -174,7 +270,7 @@ class ControlPlane:
             raise CallRefusal(
                 "language_required", "The initial language must be enabled in this profile"
             )
-        return {
+        snapshot = {
             "prompt_contract_version": 2,
             "profile_id": profile_record["entity"].removeprefix("profile:"),
             "profile_revision": profile_record["revision"],
@@ -188,16 +284,79 @@ class ControlPlane:
             "pricing": await self.spending.freeze(voice.model_dump(mode="json"), model),
             "unsaved": bool(overrides),
         }
+        if packet.direction == "inbound":
+            inbound_record, business_record = (
+                await self.current("inbound"),
+                await self.current("business"),
+            )
+            inbound = InboundSettings.model_validate(
+                (overrides or {}).get("inbound", inbound_record["value"])
+            )
+            business = BusinessSettings.model_validate(
+                (overrides or {}).get("business", business_record["value"])
+            )
+            snapshot.update(
+                direction="inbound",
+                reception_contract_version=1,
+                inbound_revision=inbound_record["revision"],
+                business_revision=business_record["revision"],
+                business={
+                    "name": business.name,
+                    "description": business.description,
+                    "approved_facts": business.approved_facts,
+                },
+                inbound=inbound.model_dump(mode="json"),
+                prompts={
+                    "conversation": inbound.instructions
+                    + "\nCollect only relevant missing information: "
+                    + "; ".join(inbound.intake_questions),
+                    "opening": inbound.greeting,
+                },
+            )
+        return snapshot
 
     def normalize_packet(self, packet: ContextPacket, snapshot: dict[str, Any]) -> ContextPacket:
         config = self.runtime_config(snapshot)
+        requested_seconds = packet.max_duration_seconds
+        if packet.direction == "inbound":
+            requested_seconds = min(
+                requested_seconds or config.default_call_seconds, config.max_call_seconds
+            )
         return packet.model_copy(
             update={
                 "personality": snapshot["personality"],
                 "profile_id": snapshot["profile_id"],
-                "max_duration_seconds": config.call_duration(packet.max_duration_seconds),
+                "max_duration_seconds": config.call_duration(requested_seconds),
             }
         )
+
+    async def practice_snapshot(
+        self, packet: ContextPacket, overrides: dict[str, Any] | None = None, mode: Mode = "voice"
+    ) -> tuple[ContextPacket, dict[str, Any]]:
+        configuration = await self.resolve(packet, overrides=overrides)
+        configuration["callback_policy"] = (await self.current("callback_policy"))["value"]
+        configuration["reception_contract_version"] = 1
+        contact_id = (overrides or {}).get("simulation_contact_id")
+        if contact_id:
+            contact = await self.contacts.get(str(contact_id))
+            configuration["contact_memory"] = {
+                "recognition": "simulated_known",
+                "name": contact["name"],
+                "background": contact["background"],
+                "revision": contact["memory"]["revision"],
+                "facts": contact["memory"]["facts"][:10],
+                "authenticated": False,
+            }
+        else:
+            configuration["contact_memory"] = {
+                "recognition": "simulated_unknown",
+                "revision": 0,
+                "facts": [],
+                "authenticated": False,
+            }
+        packet = self.normalize_packet(packet, configuration)
+        self.freeze_inputs(packet, configuration, mode)
+        return packet, configuration
 
     def freeze_inputs(
         self, packet: ContextPacket, snapshot: dict[str, Any], mode: Mode = "voice"
@@ -260,12 +419,9 @@ class ControlPlane:
     def prompt(packet: ContextPacket, snapshot: dict[str, Any]) -> str:
         if isinstance(snapshot.get("effective_prompt"), str):
             return str(snapshot["effective_prompt"])
-        return voice_instructions(
-            packet,
-            conversation_languages=snapshot["voice"]["conversation_languages"],
-            prompts=snapshot["prompts"],
-            personality_prompt=snapshot["personality_prompt"],
-        )
+        from app.reception_prompts import effective_sections
+
+        return "".join(section["text"] for section in effective_sections(packet, snapshot))
 
     async def setup(self, *, from_mcp: bool = False) -> dict[str, Any]:
         if from_mcp:
@@ -291,6 +447,11 @@ class ControlPlane:
             "defaults": global_record["value"]["voice"],
             "destination_policy": "any_valid_international_number",
             "source_line": "Spanish DIGI",
+            "reception": {
+                "business": (await self.current("business"))["value"],
+                "inbound": (await self.current("inbound"))["value"],
+                "callback_policy": (await self.current("callback_policy"))["value"],
+            },
             "owner_numbers": "Omit callback_number and owner_phone; the server resolves them.",
         }
 
@@ -320,10 +481,17 @@ class ControlPlane:
             "practice_active": self.practice.active is not None,
             "check_active": self.checks.active is not None,
             "check_id": self.checks.active.id if self.checks.active else None,
+            "review_worker": {
+                "pending": await self.db.reception_review_pending(),
+                "last_queue_check": await self.db.fetch_one(
+                    "SELECT observed_at FROM control_activity WHERE name='hermes_review_queue'"
+                ),
+            },
             "last_hermes_request": await self.db.fetch_one(
                 "SELECT observed_at FROM control_activity WHERE name='hermes_setup'"
             ),
             "measured_at": datetime.now(UTC).isoformat(),
+            "inbound": await self.service.inbound.availability(),
         }
 
     async def calls(
@@ -332,6 +500,7 @@ class ControlPlane:
         query: str = "",
         state: str = "",
         outcome: str = "",
+        direction: str = "",
         language: str = "",
         profile: str = "",
         start: str = "",
@@ -340,6 +509,13 @@ class ControlPlane:
         limit: int = 40,
     ) -> dict[str, Any]:
         clauses, values = ["1=1"], []
+        if direction:
+            if direction not in {"inbound", "outbound"}:
+                raise ValueError("Unknown call direction")
+            clauses.append(
+                "COALESCE((SELECT direction FROM call_contacts l WHERE l.call_id=c.call_id),'outbound')=?"
+            )
+            values.append(direction)
         if outcome:
             if outcome not in {"achieved", "declined", "incomplete", "uncertain", "not_recorded"}:
                 raise ValueError("Unknown outcome filter")
@@ -423,6 +599,7 @@ class ControlPlane:
                     "language": context.get("language"),
                     "profile_id": snapshot.get("profile_id") or context.get("personality"),
                     "personality": context.get("personality"),
+                    "direction": context.get("direction", "outbound"),
                 }
             )
         return {

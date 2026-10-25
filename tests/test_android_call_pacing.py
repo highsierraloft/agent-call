@@ -24,6 +24,7 @@ async def test_timed_wrapup_waits_for_quiet_and_does_not_duplicate_closing(alrea
     session._idle = asyncio.Event()
     session._assistant_busy = False
     session._system_prompt = "Follow the approved brief."
+    session._callback_timezone = "Atlantic/Canary"
     session._context = LLMContext([{"role": "system", "content": session._system_prompt}])
     session._worker = SimpleNamespace(queue_frame=AsyncMock())
     session.closing = ClosingWindow()
@@ -57,6 +58,7 @@ def test_clock_updates_keep_recipient_last_without_growing_history():
     session._max_call_seconds = 180
     session._started_at = time.monotonic()
     session._system_prompt = "Follow the approved brief."
+    session._callback_timezone = "Atlantic/Canary"
     goodbye = {"role": "user", "content": "Thanks for the chat and goodbye."}
     session._context = LLMContext([{"role": "system", "content": session._system_prompt}, goodbye])
     session._add_time_notice()

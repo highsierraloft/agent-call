@@ -4,7 +4,10 @@
 
 This fork adds a Samsung SIM and OpenRouter route for a private Hermes deployment.
 Keep the existing MCP contract and persistence where practical. The requesting agent
-interprets the transcript; the deployment disables post-call model extraction.
+interprets the transcript; the deployment disables inline post-call model extraction.
+Reception reviews use the existing Hermes account and a durable local queue.
+Keep inbound answering off until business setup and selected-SIM handset acceptance pass.
+Practice must not persist contacts, memory, opt-outs, or schedules. Never retry an uncertain callback dial.
 Keep documentation aligned with behavior and distinguish simulated transport checks
 from real phone tests. Never copy local credentials, transcripts, or host access records
 into this repository. The upstream Fly deployment is outside this fork's scope.

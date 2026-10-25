@@ -39,6 +39,7 @@ class AsteriskClient:
         if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", application):
             raise ValueError("Invalid Asterisk application name")
         self.application = application
+        self._incoming_channels: dict[str, str] = {}
         self.base_url = base_url.rstrip("/")
         self._authorization = (
             "Basic " + base64.b64encode(f"{username}:{password}".encode()).decode()
@@ -187,14 +188,14 @@ class AsteriskClient:
         )
 
     async def bridge_answered_call(self, call_id: str) -> None:
-        cell, _, bridge = self.resource_ids(call_id)
+        cell, _, bridge = self.owned_ids(call_id)
         response = await self.request("GET", "channels/" + cell)
         if response.json().get("state") != "Up":
             raise AsteriskError("The telephone channel has not answered")
         await self.request("POST", "bridges/" + bridge + "/addChannel", body={"channel": cell})
 
     async def hangup(self, call_id: str) -> bool:
-        cell, media, bridge = self.resource_ids(call_id)
+        cell, media, bridge = self.owned_ids(call_id)
         succeeded = True
         for path in ["channels/" + cell, "channels/" + media, "bridges/" + bridge]:
             try:
@@ -204,12 +205,60 @@ class AsteriskClient:
         return succeeded
 
     async def media_absent(self, call_id: str) -> bool:
-        cell, media, _ = self.resource_ids(call_id)
+        cell, media, _ = self.owned_ids(call_id)
         for identifier in [cell, media]:
             response = await self.request("GET", "channels/" + identifier, missing_ok=True)
             if response.status_code != 404:
                 return False
         return True
+
+    def adopt_incoming(self, call_id: str, channel_id: str) -> None:
+        self.resource_ids(call_id)
+        if not re.fullmatch(r"[a-zA-Z0-9_.-]{1,128}", channel_id):
+            raise ValueError("Invalid incoming channel identifier")
+        if (
+            channel_id in self._incoming_channels.values()
+            and self._incoming_channels.get(call_id) != channel_id
+        ):
+            raise ValueError("Incoming channel already belongs to another call")
+        self._incoming_channels[call_id] = channel_id
+
+    def owned_ids(self, call_id: str) -> tuple[str, str, str]:
+        cell, media, bridge = self.resource_ids(call_id)
+        return self._incoming_channels.get(call_id, cell), media, bridge
+
+    def forget_incoming(self, call_id: str) -> None:
+        self._incoming_channels.pop(call_id, None)
+
+    async def answer_incoming(self, call_id: str, max_seconds: int) -> None:
+        if call_id not in self._incoming_channels:
+            raise ValueError("This call does not own an incoming channel")
+        self._validate_duration(max_seconds)
+        cell, _, _ = self.owned_ids(call_id)
+        await self.request(
+            "POST",
+            "channels/" + cell + "/variable",
+            body={"variable": "TIMEOUT(absolute)", "value": str(max_seconds)},
+        )
+        await self.request("POST", "channels/" + cell + "/answer")
+
+    async def release_incoming(self, channel_id: str) -> None:
+        if not re.fullmatch(r"[a-zA-Z0-9_.-]{1,128}", channel_id):
+            raise ValueError("Invalid incoming channel identifier")
+        # A failed SIP leg causes the guarded gateway to withdraw ownership without rejecting the handset.
+        await self.request("DELETE", "channels/" + channel_id, missing_ok=True)
+
+    async def play_local_exit(self, call_id: str, kind: str, language: str) -> str:
+        if kind not in {"failure", "silence"} or language not in {"en", "es", "ru", "uk"}:
+            raise ValueError("Unknown reception exit message")
+        _, _, bridge = self.resource_ids(call_id)
+        playback_id = call_id + "-exit"
+        await self.request(
+            "POST",
+            "bridges/" + bridge + "/play/" + playback_id,
+            body={"media": f"sound:reception/reception-{kind}-{language}"},
+        )
+        return playback_id
 
     async def events(self) -> AsyncIterator[dict[str, Any]]:
         parsed = urlsplit(self.base_url)

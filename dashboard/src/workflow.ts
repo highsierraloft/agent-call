@@ -35,6 +35,15 @@ export function instant(value: string) {
     throw new Error("This local time does not exist. Choose another time.");
   return d.toISOString();
 }
+export function zonedInstant(value: string) {
+  const utc = instant(value);
+  if (!utc) return null;
+  const offset = -new Date(utc).getTimezoneOffset();
+  const absolute = Math.abs(offset);
+  const hours = String(Math.floor(absolute / 60)).padStart(2, "0");
+  const minutes = String(absolute % 60).padStart(2, "0");
+  return `${value}:00${offset >= 0 ? "+" : "-"}${hours}:${minutes}`;
+}
 export const lines = (text: string) =>
   text
     .split("\n")

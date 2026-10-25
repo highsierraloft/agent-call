@@ -176,7 +176,7 @@ async def test_text_practice_inspector_uses_the_frozen_settings_and_real_request
             data["last_request"]["body"]["messages"][-1]["content"]
             == "Hello from the inspector test"
         )
-        assert data["last_request"]["body"]["tools"] == model_tools("text")
+        assert data["last_request"]["body"]["tools"] == model_tools("text", callbacks_enabled=True)
         assert not panel.h.asterisk.dials
     finally:
         await panel.client.delete(f"/admin/api/practice/{session_id}")

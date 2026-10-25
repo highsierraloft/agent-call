@@ -59,7 +59,12 @@ class PlansMixin:
                 (
                     plan_id,
                     json.dumps(
-                        {key: value for key, value in context.items() if key != "profile_id"}
+                        {
+                            key: value
+                            for key, value in context.items()
+                            if key != "profile_id"
+                            and not (key == "direction" and value == "outbound")
+                        }
                     ),
                     authority_basis,
                     now,

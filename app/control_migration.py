@@ -44,3 +44,19 @@ async def migrate_workflow_guide(db: Database) -> None:
             guide["revision"],
             "call workflow guide migration",
         )
+
+
+async def migrate_reception_guide(db: Database) -> None:
+    from app.reception_instructions import RECEPTION_GUIDE
+
+    if await db.fetch_one("SELECT 1 FROM reception_state WHERE name='guide_migrated'"):
+        return
+    guide = await db.control_current("guide")
+    if guide and "Reception, contacts, and confirmed callbacks" not in guide["value"]["text"]:
+        await db.control_save(
+            "guide",
+            {"text": guide["value"]["text"] + "\n" + RECEPTION_GUIDE},
+            guide["revision"],
+            "reception workflow migration",
+        )
+    await db.execute("INSERT OR IGNORE INTO reception_state VALUES ('guide_migrated','true')")

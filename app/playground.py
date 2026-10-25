@@ -12,7 +12,8 @@ from typing import TYPE_CHECKING, Any, Literal
 import httpx
 from fastapi import WebSocket
 
-from app.call_ai_inputs import ModelRequestTrace, model_options, model_tools
+from app.call_ai_inputs import ModelRequestTrace, model_options, model_tools, scheduling_clock
+from app.callback_voice import PracticeCallbacks
 from app.db.deployment import _lock_is_active
 from app.models import ContextPacket
 
@@ -40,6 +41,8 @@ class PracticeSession:
     closed: asyncio.Event = field(default_factory=asyncio.Event)
     closer: asyncio.Task[Any] | None = None
     request_trace: ModelRequestTrace = field(default_factory=ModelRequestTrace)
+    callbacks: PracticeCallbacks | None = None
+    model_turns: list[list[dict[str, Any]]] = field(default_factory=list)
 
     def view(self) -> dict[str, Any]:
         return {
@@ -50,6 +53,7 @@ class PracticeSession:
             "metrics": self.metrics,
             "error": self.error,
             "configuration": self.configuration,
+            "callback_previews": list(self.callbacks.receipts.values()) if self.callbacks else [],
         }
 
 
@@ -80,10 +84,11 @@ class Playground:
             )
             if lock and lock["locked"] and _lock_is_active(lock["locked_at"]):
                 raise ValueError("The calling service is being updated. Try again shortly.")
-            configuration = await self.control.resolve(packet, overrides=overrides)
-            packet = self.control.normalize_packet(packet, configuration)
-            self.control.freeze_inputs(packet, configuration, mode)
+            packet, configuration = await self.control.practice_snapshot(packet, overrides, mode)
             session = PracticeSession(secrets.token_urlsafe(24), mode, packet, configuration)
+            session.callbacks = PracticeCallbacks(
+                configuration["callback_policy"], packet.language or "en"
+            )
             self.active = session
             session.timer = asyncio.create_task(self._expire(session))
             return session.view()
@@ -173,6 +178,8 @@ class Playground:
         session.task = asyncio.current_task()
 
         def transcript(speaker: str, text: str, source: str, interrupted: bool) -> None:
+            if session.callbacks:
+                session.callbacks.observe(speaker, text, interrupted)
             session.messages.append(
                 {"speaker": speaker, "text": text, "interrupted": interrupted, "source": source}
             )
@@ -203,7 +210,12 @@ class Playground:
                 browser=True,
                 api_key=self.control.service._api_key,
                 callbacks=VoiceCallbacks(
-                    transcript, failed, finish, suppress, session.metrics.append
+                    transcript,
+                    failed,
+                    finish,
+                    suppress,
+                    session.metrics.append,
+                    session.callbacks.tool if session.callbacks else None,
                 ),
             )
             await session.voice.run()
@@ -232,28 +244,64 @@ class Playground:
                     "content": self.control.prompt(session.packet, session.configuration),
                 }
             ]
-            messages += [
-                {"role": "user" if m["speaker"] == "callee" else "assistant", "content": m["text"]}
-                for m in session.messages[-40:]
-            ]
+            messages[0]["content"] += "\n" + scheduling_clock(
+                session.configuration["callback_policy"]["timezone"]
+            )
+            messages += [message for turn in session.model_turns[-20:] for message in turn]
+            turn_start = len(messages)
             messages.append({"role": "user", "content": text})
             body: dict[str, Any] = {
                 **model_options(config, "text"),
                 "messages": messages,
-                "tools": model_tools("text"),
+                "tools": model_tools("text", callbacks_enabled=True),
             }
             try:
+                assert session.callbacks is not None
+                session.callbacks.observe("callee", text)
                 started = time.monotonic()
                 async with httpx.AsyncClient(
                     timeout=30, event_hooks={"request": [session.request_trace.capture]}
                 ) as client:
-                    response = await client.post(
-                        "https://openrouter.ai/api/v1/chat/completions",
-                        json=body,
-                        headers={"Authorization": "Bearer " + self.control.service._api_key},
-                    )
-                    response.raise_for_status()
-                    message = response.json()["choices"][0]["message"]
+                    for _ in range(4):
+                        response = await client.post(
+                            "https://openrouter.ai/api/v1/chat/completions",
+                            json=body,
+                            headers={"Authorization": "Bearer " + self.control.service._api_key},
+                        )
+                        response.raise_for_status()
+                        message = response.json()["choices"][0]["message"]
+                        tool_calls = message.get("tool_calls", [])
+                        if not tool_calls or any(
+                            tool.get("function", {}).get("name") == "finish_call"
+                            for tool in tool_calls
+                        ):
+                            break
+                        body["messages"].append(message)
+                        automatic_readback = None
+                        for tool in tool_calls:
+                            try:
+                                result = await session.callbacks.tool(
+                                    tool["function"]["name"],
+                                    json.loads(tool["function"]["arguments"]),
+                                )
+                            except (ValueError, LookupError) as exc:
+                                result = {"saved": False, "error": str(exc)}
+                            body["messages"].append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": tool["id"],
+                                    "content": json.dumps(result),
+                                }
+                            )
+                            if tool["function"]["name"] == "propose_callback" and result.get(
+                                "readback"
+                            ):
+                                automatic_readback = result["readback"]
+                        if automatic_readback:
+                            message = {"role": "assistant", "content": automatic_readback}
+                            break
+                    else:
+                        raise ValueError("Practice tool limit reached")
                 output = message.get("content") or ""
                 finished = False
                 for tool in message.get("tool_calls", []):
@@ -265,6 +313,9 @@ class Playground:
                 session.messages.extend(
                     [{"speaker": "callee", "text": text}, {"speaker": "assistant", "text": output}]
                 )
+                session.callbacks.observe("assistant", output)
+                session.model_turns.append([*body["messages"][turn_start:], message])
+                session.model_turns = session.model_turns[-20:]
                 session.metrics.append(
                     {
                         "seconds": round(time.monotonic() - started, 3),

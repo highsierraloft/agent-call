@@ -189,9 +189,7 @@ async def preview(
     body: PracticeInput, control: ControlPlane = Depends(require_control)
 ) -> dict[str, Any]:
     try:
-        snapshot = await control.resolve(body.context, overrides=body.overrides)
-        packet = control.normalize_packet(body.context, snapshot)
-        control.freeze_inputs(packet, snapshot, body.mode)
+        packet, snapshot = await control.practice_snapshot(body.context, body.overrides, body.mode)
         return {
             "prompt": control.prompt(packet, snapshot),
             "configuration": snapshot,
@@ -207,6 +205,7 @@ async def calls(
     q: str = "",
     state: str = "",
     outcome: str = "",
+    direction: str = "",
     language: str = "",
     profile: str = "",
     start: str = "",
@@ -220,6 +219,7 @@ async def calls(
             query=q,
             state=state,
             outcome=outcome,
+            direction=direction,
             language=language,
             profile=profile,
             start=start,

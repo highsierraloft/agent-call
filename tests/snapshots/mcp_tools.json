@@ -303,6 +303,14 @@
               "default": null,
               "description": "Optional evidence that the task is done. Refusal or missing facts can still end the call."
             },
+            "direction": {
+              "default": "outbound",
+              "enum": [
+                "outbound",
+                "inbound"
+              ],
+              "type": "string"
+            },
             "escalation": {
               "properties": {
                 "mode": {
@@ -496,8 +504,19 @@
                   "default": null
                 },
                 "phone": {
-                  "pattern": "^\\+[1-9]\\d{1,14}$",
-                  "type": "string"
+                  "anyOf": [
+                    {
+                      "pattern": "^\\+[1-9]\\d{1,14}$",
+                      "type": "string"
+                    },
+                    {
+                      "enum": [
+                        "withheld",
+                        "unavailable"
+                      ],
+                      "type": "string"
+                    }
+                  ]
                 }
               },
               "required": [

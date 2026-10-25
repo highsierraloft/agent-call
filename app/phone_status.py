@@ -35,8 +35,33 @@ class PhoneStatus:
         return (
             state.get("gateway_package") == GUARDED_GATEWAY_PACKAGE
             and state.get("selected_sim_slot") == self.selected_slot
-            and state.get("incoming_calls_disabled") is True
+            and (
+                state.get("incoming_calls_disabled") is True
+                or (
+                    state.get("incoming_selected_only") is True
+                    and state.get("inbound_contract") == 2
+                )
+            )
         )
+
+    def inbound_problem(self) -> str | None:
+        state = self.read()
+        if state is None:
+            return "Phone supervision is unavailable or stale"
+        if (
+            not self.policy_matches(state)
+            or state.get("inbound_contract") != 2
+            or state.get("incoming_selected_only") is not True
+        ):
+            return "The selected-SIM inbound gateway contract is not confirmed"
+        if (
+            state.get("control_ready") is not True
+            or state.get("call_ready") is not True
+            or state.get("gateway_takeover") is not True
+            or state.get("echo_mode") is not False
+        ):
+            return "The phone gateway is unavailable for inbound reception"
+        return None
 
     def admission_problem(self) -> str | None:
         state = self.read()

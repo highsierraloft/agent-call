@@ -73,6 +73,43 @@ export async function installFixture(page: Page) {
       created_at: "2026-10-24T08:00:00Z",
       value: profile(name),
     };
+  for (const [entity, value] of Object.entries({
+    business: {
+      name: "Example Business",
+      description: "Reception test business",
+      approved_facts: ["We discuss customer needs"],
+      timezone: "Atlantic/Canary",
+      memory_review_instructions:
+        "Use transcript evidence and protect owner corrections.",
+    },
+    inbound: {
+      enabled: false,
+      instructions: "Understand the caller's need.",
+      greeting: "Name the business and identify the AI assistant.",
+      intake_questions: ["Name", "Problem and next step"],
+      profile_id: "warm",
+      language: "en",
+      max_call_seconds: 1800,
+      silence_seconds: 45,
+    },
+    callback_policy: {
+      enabled: true,
+      timezone: "Atlantic/Canary",
+      weekdays: [0, 1, 2, 3, 4],
+      opens: "09:00",
+      closes: "18:00",
+      default_window_minutes: 15,
+      max_window_minutes: 60,
+      allow_alternate_number: true,
+      attempts: 1,
+    },
+  }))
+    records[entity] = {
+      entity,
+      revision: 1,
+      created_at: "2026-10-25T08:00:00Z",
+      value,
+    };
   const histories: Record<string, any[]> = {};
   for (const [key, value] of Object.entries(records))
     histories[key] = [structuredClone(value)];
@@ -120,6 +157,11 @@ export async function installFixture(page: Page) {
       })),
     defaults: records.global.value.voice,
     source_line: "Spanish DIGI",
+    reception: {
+      business: records.business.value,
+      inbound: records.inbound.value,
+      callback_policy: records.callback_policy.value,
+    },
   });
   const brief = {
     owner: setup().owner,
@@ -288,7 +330,17 @@ export async function installFixture(page: Page) {
         check_active: state.check?.state === "running",
         check_id: state.check?.state === "running" ? state.check.id : null,
         last_hermes_request: null,
+        inbound: {
+          answering_on: records.inbound.value.enabled,
+          availability: "Ready",
+          reason: null,
+          business_configured: true,
+        },
       });
+    if (path === "/contacts")
+      return respond({ contacts: [], next_offset: null });
+    if (path === "/callbacks")
+      return respond({ callbacks: [], next_offset: null });
     if (path === "/catalog")
       return respond({
         voices: [
@@ -395,11 +447,23 @@ export async function installFixture(page: Page) {
       );
     if (path.startsWith("/configuration/")) {
       const parts = path.split("/");
-      const entity = decodeURIComponent(parts[2]);
-      if (parts[3] === "history") return respond(histories[entity] || []);
+      const requestedEntity = decodeURIComponent(parts[2]);
+      const scope =
+        requestedEntity === "outbound"
+          ? "prompts"
+          : requestedEntity === "voice_defaults"
+            ? "voice"
+            : null;
+      const entity = scope ? "global" : requestedEntity;
+      const project = (record: any) =>
+        scope
+          ? { ...record, entity: requestedEntity, value: record.value[scope] }
+          : record;
+      if (parts[3] === "history")
+        return respond((histories[entity] || []).map(project));
       if (method === "GET")
         return records[entity]
-          ? respond(records[entity])
+          ? respond(project(records[entity]))
           : respond({ detail: "Not found" }, 404);
       if (method === "PUT") {
         if ((records[entity]?.revision || 0) !== body.expected_revision)
@@ -413,12 +477,14 @@ export async function installFixture(page: Page) {
         records[entity] = {
           entity,
           revision: body.expected_revision + 1,
-          value: body.value,
+          value: scope
+            ? { ...records.global.value, [scope]: body.value }
+            : body.value,
           actor: "owner@example.test",
           created_at: "2026-10-24T10:00:00Z",
         };
         (histories[entity] ??= []).unshift(structuredClone(records[entity]));
-        return respond(records[entity]);
+        return respond(project(records[entity]));
       }
     }
     if (path === "/checks" && method === "GET")

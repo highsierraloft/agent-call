@@ -59,6 +59,7 @@ from app.call_ai_inputs import (
     initial_messages,
     model_options,
     model_tools,
+    scheduling_clock,
     time_notice,
 )
 from app.contact_preferences import is_direct_opt_out
@@ -81,6 +82,8 @@ class VoiceCallbacks:
     finish: Callable[[Callable[[], bool]], Awaitable[bool]]
     suppress_destination: Callable[[], Awaitable[None]] | None = None
     metrics: Callable[[dict[str, Any]], Any] | None = None
+    callback_tool: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None = None
+    silence_timeout: Callable[[], None] | None = None
 
 
 class ClosingWindow:
@@ -171,12 +174,19 @@ class AndroidVoiceSession:
         pipecat_logger.disable("pipecat")
         pipecat_logger.disable("pipecat_asterisk")
         self.callbacks = callbacks
+        self.language: str = packet.language
+        self._allowed_languages = set(config.conversation_languages)
         self.usage = UsageLedger(stt=config.stt_transport, tts=config.tts_transport)
         self.ready = asyncio.Event()
         self.connected = asyncio.Event()
         self.closing = ClosingWindow()
         self._closing_task: asyncio.Task[None] | None = None
         self._wrapup_task: asyncio.Task[None] | None = None
+        self._silence_task: asyncio.Task[None] | None = None
+        self._last_activity = time.monotonic()
+        self._silence_seconds = int(
+            ((configuration or {}).get("inbound") or {}).get("silence_seconds", 0)
+        )
         self._started_at = time.monotonic()
         self._max_call_seconds = config.call_duration(packet.max_duration_seconds)
         self._idle = asyncio.Event()
@@ -184,6 +194,10 @@ class AndroidVoiceSession:
         self._assistant_busy = False
         self._playback_active = False
         self._sales_call = packet.is_commercial
+        self._respect_all_opt_outs = bool((configuration or {}).get("reception_contract_version"))
+        self._callback_timezone = ((configuration or {}).get("callback_policy") or {}).get(
+            "timezone"
+        )
         self._destination_suppressed = False
         self._identity_filter = SpeakerIdentityFilter(packet.owner.display_name)
         self._played_response_serial: int | None = None
@@ -228,6 +242,7 @@ class AndroidVoiceSession:
         elif config.stt_transport == "soniox":
             semantic = config.soniox_turn_detection == "semantic"
             stt = SonioxSTTService(
+                on_language=self._note_language,
                 usage=self.usage,
                 api_key=config.soniox_key().get_secret_value(),
                 sample_rate=input_sample_rate,
@@ -310,7 +325,6 @@ class AndroidVoiceSession:
             )
         else:
             tts = OpenRouterTTSService(api_key=api_key, model=config.tts_model, voice=config.voice)
-        function = model_tools()[0]["function"]
         tools = ToolsSchema(
             standard_tools=[
                 FunctionSchema(
@@ -319,6 +333,12 @@ class AndroidVoiceSession:
                     properties=function["parameters"]["properties"],
                     required=function["parameters"]["required"],
                 )
+                for function in [
+                    tool["function"]
+                    for tool in model_tools(
+                        callbacks_enabled=bool((configuration or {}).get("callback_policy"))
+                    )
+                ]
             ]
         )
         self._system_prompt = (
@@ -386,6 +406,9 @@ class AndroidVoiceSession:
         self._runner = WorkerRunner(handle_sigint=False)
 
         llm.register_function("finish_call", self._finish_call, cancel_on_interruption=True)
+        if (configuration or {}).get("callback_policy"):
+            for name in ("propose_callback", "confirm_callback", "cancel_callback"):
+                llm.register_function(name, self._callback_tool, cancel_on_interruption=True)
 
         async def pipeline_error(_worker: Any, frame: ErrorFrame) -> None:
             self.usage.incomplete = True
@@ -404,6 +427,7 @@ class AndroidVoiceSession:
             callbacks.failed()
 
         async def user_started(*_: Any) -> None:
+            self._last_activity = time.monotonic()
             self._user_speaking = True
             self._idle.clear()
             self.closing.user_started()
@@ -413,7 +437,10 @@ class AndroidVoiceSession:
 
         async def user_message(_aggregator: Any, message: Any) -> None:
             if message.content:
-                opt_out = self._sales_call and is_direct_opt_out(message.content)
+                self._last_activity = time.monotonic()
+                opt_out = (self._sales_call or self._respect_all_opt_outs) and is_direct_opt_out(
+                    message.content
+                )
                 if opt_out:
                     await self._suppress_destination()
                 self._context.set_tool_choice(
@@ -434,6 +461,7 @@ class AndroidVoiceSession:
             self._idle.clear()
 
         async def assistant_message(_aggregator: Any, message: Any) -> None:
+            self._last_activity = time.monotonic()
             self._assistant_busy = False
             if not self._user_speaking and not self._playback_active:
                 self._idle.set()
@@ -470,7 +498,9 @@ class AndroidVoiceSession:
                 {"closing_requested": False, "reason": "Supply a brief farewell to speak"}
             )
             return
-        if params.arguments.get("do_not_call") is True and getattr(self, "_sales_call", False):
+        if params.arguments.get("do_not_call") is True and (
+            getattr(self, "_sales_call", False) or getattr(self, "_respect_all_opt_outs", False)
+        ):
             await self._suppress_destination()
         identity_filter = getattr(self, "_identity_filter", None)
         if identity_filter is not None:
@@ -518,9 +548,37 @@ class AndroidVoiceSession:
             raise RuntimeError("Recipient opt-out storage failed") from None
         self._destination_suppressed = True
 
+    async def _callback_tool(self, params: FunctionCallParams) -> None:
+        try:
+            if self.callbacks.callback_tool is None:
+                raise ValueError("Callback scheduling is unavailable in this session")
+            result = await self.callbacks.callback_tool(
+                params.function_name, dict(params.arguments)
+            )
+        except (ValueError, LookupError) as exc:
+            result = {"saved": False, "error": str(exc)}
+        readback = (
+            result.get("readback")
+            if params.function_name == "propose_callback" and not result.get("schedule_id")
+            else None
+        )
+        if isinstance(readback, str):
+            await params.result_callback(
+                result, properties=FunctionCallResultProperties(run_llm=False)
+            )
+            await self._worker.queue_frame(TTSSpeakFrame(readback))
+        else:
+            await params.result_callback(result)
+
+    def _note_language(self, language: str) -> None:
+        if language in self._allowed_languages:
+            self.language = language
+
     def _add_time_notice(self, *, closing: bool = False) -> None:
         remaining = max(0, int(self._max_call_seconds - (time.monotonic() - self._started_at)))
         content = time_notice(remaining, closing=closing)
+        if self._callback_timezone:
+            content += "\n" + scheduling_clock(self._callback_timezone)
         # The Gemini adapter converts additional system messages to user messages.
         # Update the leading instruction so internal timing never becomes recipient speech.
         self._context.messages[0] = {
@@ -575,7 +633,21 @@ class AndroidVoiceSession:
             self._assistant_busy = True
             self._add_time_notice()
             self._wrapup_task = asyncio.create_task(self._request_timed_wrapup())
+            self._last_activity = time.monotonic()
+            if self._silence_seconds and self.callbacks.silence_timeout:
+                self._silence_task = asyncio.create_task(self._watch_silence())
             await self._worker.queue_frame(LLMRunFrame())
+
+    async def _watch_silence(self) -> None:
+        while True:
+            await asyncio.sleep(1)
+            if (
+                not (self._user_speaking or self._assistant_busy or self._playback_active)
+                and time.monotonic() - self._last_activity >= self._silence_seconds
+            ):
+                assert self.callbacks.silence_timeout is not None
+                self.callbacks.silence_timeout()
+                return
 
     async def stop(self) -> None:
         await self._runner.cancel(reason="call ended")
@@ -588,6 +660,9 @@ class AndroidVoiceSession:
             self.callbacks.failed()
             raise
         finally:
+            if self._silence_task:
+                self._silence_task.cancel()
+                await asyncio.gather(self._silence_task, return_exceptions=True)
             if self._closing_task:
                 self._closing_task.cancel()
                 await asyncio.gather(self._closing_task, return_exceptions=True)

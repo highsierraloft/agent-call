@@ -15,7 +15,7 @@ from fastmcp.client import Client
 
 from app.db.control import RevisionConflict
 from app.mcp_tools import register_tools
-from app.routes import control
+from app.routes import control, reception
 from app.voice_prompts import voice_instructions
 from tests import test_android_calls as phone_tests
 
@@ -45,6 +45,7 @@ async def panel(android, tmp_path):
     register_tools(mcp, lambda: h.service, android_backend=True)
     app.state.mcp = mcp
     app.include_router(control.router)
+    app.include_router(reception.router)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app),
         base_url="https://panel.test.ts.net:8444",
@@ -283,7 +284,7 @@ async def test_legacy_calls_have_no_invented_snapshot(panel):
     assert result["configuration"] is None and result["prompt"] is None
 
 
-async def test_unsaved_practice_is_isolated_blocks_dialing_and_leaves_no_calls(panel):
+async def test_unsaved_practice_is_isolated_and_telephone_preempts_it_cleanly(panel):
     h = panel.h
     before = await h.service.control.current("profile:warm")
     custom = copy.deepcopy(before["value"])
@@ -303,16 +304,6 @@ async def test_unsaved_practice_is_isolated_blocks_dialing_and_leaves_no_calls(p
         and "moon garden" in practice["configuration"]["personality_prompt"]
     )
     assert (await h.service.control.current("profile:warm")) == before
-    plan = await prepare(h)
-    refused = await panel.client.post(
-        "/admin/api/calls/start",
-        json={
-            "plan_id": plan.plan_id,
-            "explicit_confirmation": True,
-            "confirmation_text": plan.confirmation_summary,
-        },
-    )
-    assert refused.status_code == 409 and not h.asterisk.dials
     with respx.mock as mock:
         mock.post("https://openrouter.ai/api/v1/chat/completions").respond(
             200, json={"choices": [{"message": {"content": "Tell me about the garden."}}]}
@@ -324,10 +315,21 @@ async def test_unsaved_practice_is_isolated_blocks_dialing_and_leaves_no_calls(p
     assert (await panel.client.get("/admin/api/practice/" + practice["id"])).json()[
         "state"
     ] == "ready"
-    assert (await panel.client.delete("/admin/api/practice/" + practice["id"])).status_code == 204
-    assert h.service.control.practice.active is None
     assert not await h.service.db.list_calls()
     assert not h.asterisk.dials
+    plan = await prepare(h)
+    started = await panel.client.post(
+        "/admin/api/calls/start",
+        json={
+            "plan_id": plan.plan_id,
+            "explicit_confirmation": True,
+            "confirmation_text": plan.confirmation_summary,
+        },
+    )
+    assert started.status_code == 200 and h.service.control.practice.active is None
+    assert "telephone" in h.service.control.practice.get(practice["id"]).error
+    snapshot = await h.service.db.control_plan(plan.plan_id)
+    assert "moon garden" not in snapshot["personality_prompt"]
 
 
 async def test_busy_practice_refuses_deployment_without_leaving_a_lease(android):

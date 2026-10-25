@@ -1,0 +1,41 @@
+{
+  "provider": "Inworld",
+  "model": "inworld-tts-2",
+  "voice": "Wade",
+  "delivery": "STABLE",
+  "format": "mono PCM16 WAV at 8000 Hz",
+  "files": {
+    "reception-failure-en.wav": {
+      "seconds": 4.34,
+      "sha256": "491d150087858cc6d94f8460254b2e8f1c05bc8cbe17f69ceb337175c6de335f"
+    },
+    "reception-failure-es.wav": {
+      "seconds": 5.72,
+      "sha256": "29e7e0a4a0a52cec8e11bf11f81e2aff7450afb0441d1151bf1591030987369d"
+    },
+    "reception-failure-ru.wav": {
+      "seconds": 6.61,
+      "sha256": "de15ae5d5df5f9d4c9a3a7c1b66e0968971f2d64f2624d431e0e74a92ad34911"
+    },
+    "reception-failure-uk.wav": {
+      "seconds": 6.6,
+      "sha256": "11c0ccd560c8fdabbbe24034b0bcd7002e06dd926b1f543f1cf91f84cf0eb402"
+    },
+    "reception-silence-en.wav": {
+      "seconds": 3.82,
+      "sha256": "34259f149ad212acb29412caf0814ef50b1ddcfb3160fbfeba9cba8431fda611"
+    },
+    "reception-silence-es.wav": {
+      "seconds": 4.73,
+      "sha256": "36548536f5990a691ed27d2b057a878b7fc26262eab94a8063dbb4fb260bf570"
+    },
+    "reception-silence-ru.wav": {
+      "seconds": 5.39,
+      "sha256": "b314ce3f69e9d521f6806fde12bfa1435d18c0ab2261deb3ac0a3119e7242fb6"
+    },
+    "reception-silence-uk.wav": {
+      "seconds": 5.48,
+      "sha256": "0c3533ca05b7a5b0011893dfeb4aa3ae9a5528a5b1b07ee32986fe6f0f418038"
+    }
+  }
+}

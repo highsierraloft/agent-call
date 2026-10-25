@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { api, message } from "./api";
 import AIInputs from "./AIInputs";
+import ContactAssociation from "./ContactAssociation";
 import OutcomePanel from "./OutcomePanel";
 import { CostBreakdown } from "./Costs";
 import { date, outcomes } from "./workflow";
@@ -45,6 +46,7 @@ export default function Calls({
     [q, setQ] = useState(""),
     [state, setState] = useState(""),
     [outcomeFilter, setOutcomeFilter] = useState(""),
+    [direction, setDirection] = useState(""),
     [language, setLanguage] = useState(""),
     [profile, setProfile] = useState(""),
     [start, setStart] = useState(""),
@@ -61,6 +63,7 @@ export default function Calls({
     q,
     state,
     outcomeFilter,
+    direction,
     language,
     profile,
     start,
@@ -68,7 +71,7 @@ export default function Calls({
   ]);
   useEffect(() => {
     paginated.current = false;
-  }, [q, state, outcomeFilter, language, profile, start, end]);
+  }, [q, state, outcomeFilter, direction, language, profile, start, end]);
   useEffect(() => {
     const controller = new AbortController();
     const timer = setTimeout(
@@ -78,6 +81,7 @@ export default function Calls({
           q,
           state,
           outcome: outcomeFilter,
+          direction,
           language,
           profile,
           start,
@@ -107,7 +111,17 @@ export default function Calls({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [q, state, outcomeFilter, language, profile, start, end, refresh]);
+  }, [
+    q,
+    state,
+    outcomeFilter,
+    direction,
+    language,
+    profile,
+    start,
+    end,
+    refresh,
+  ]);
   useEffect(() => {
     const timer = setInterval(() => {
       if (!paginated.current && !pageRequest.current) setRefresh((v) => v + 1);
@@ -126,6 +140,7 @@ export default function Calls({
             q,
             state,
             outcome: outcomeFilter,
+            direction,
             language,
             profile,
             start,
@@ -163,12 +178,27 @@ export default function Calls({
           <details className="compact-details">
             <summary>
               Filters
-              {[state, outcomeFilter, language, profile, start, end].filter(
-                Boolean,
-              ).length > 0 &&
-                ` · ${[state, outcomeFilter, language, profile, start, end].filter(Boolean).length} active`}
+              {[
+                state,
+                outcomeFilter,
+                direction,
+                language,
+                profile,
+                start,
+                end,
+              ].filter(Boolean).length > 0 &&
+                ` · ${[state, outcomeFilter, direction, language, profile, start, end].filter(Boolean).length} active`}
             </summary>
             <div className="filter-row">
+              <select
+                aria-label="Filter by direction"
+                value={direction}
+                onChange={(e) => setDirection(e.target.value)}
+              >
+                <option value="">All directions</option>
+                <option value="inbound">Incoming</option>
+                <option value="outbound">Outgoing</option>
+              </select>
               <select
                 aria-label="Filter by status"
                 value={state}
@@ -647,6 +677,50 @@ function CallDetail({
               <p className="muted">No speech has been transcribed.</p>
             )}
           </>
+        )}
+        {tab === "outcome" && (
+          <section className="reading call-summary">
+            <h3>Conversation summary</h3>
+            <p>
+              {detail.summary?.value.text ||
+                (detail.review?.state === "pending" ||
+                detail.review?.state === "leased"
+                  ? "Hermes review pending. The full transcript is already available."
+                  : "No summary recorded.")}
+            </p>
+            {detail.contact?.contact_id && (
+              <a href={"/contacts/" + detail.contact.contact_id}>
+                Open Contact Memory & History
+              </a>
+            )}
+            {!["pending", "leased"].includes(detail.review?.state || "") &&
+              terminal(detail.state) && (
+                <button
+                  onClick={async () => {
+                    try {
+                      await api("/calls/" + detail.call_id + "/review", "POST");
+                      setDetail((old) =>
+                        old ? { ...old, review: { state: "pending" } } : old,
+                      );
+                    } catch (e) {
+                      setError(message(e));
+                    }
+                  }}
+                >
+                  {detail.review
+                    ? "Review Again with Hermes"
+                    : "Review with Hermes"}
+                </button>
+              )}
+            {terminal(detail.state) && detail.contact && (
+              <ContactAssociation
+                detail={detail}
+                onUpdated={(contact) =>
+                  setDetail((old) => (old ? { ...old, contact } : old))
+                }
+              />
+            )}
+          </section>
         )}
         {tab === "outcome" &&
           (terminal(detail.state) ? (

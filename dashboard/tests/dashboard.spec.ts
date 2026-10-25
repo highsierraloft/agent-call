@@ -17,12 +17,29 @@ async function action(page: Page, name: string, menu = "More") {
       .click();
   await button.click();
 }
+async function navigation(page: Page, label: string) {
+  await page.locator(".sidebar").waitFor({ state: "attached" });
+  const menu = page.getByRole("button", { name: "Menu", exact: true });
+  if (await menu.isVisible()) await menu.click();
+  await page.getByRole("link", { name: label, exact: true }).click();
+}
 async function globalDefaults(page: Page) {
-  const picker = page.getByRole("combobox", { name: "Editing", exact: true });
-  if (await picker.isVisible()) await picker.selectOption("global");
-  else await page.getByRole("button", { name: "Global Defaults" }).click();
+  await navigation(page, "Settings");
+  await page
+    .getByRole("tablist", { name: "Workspace settings", exact: true })
+    .getByRole("tab", { name: "Voice & Models", exact: true })
+    .click();
+  await expect(
+    page.getByRole("combobox", { name: "OpenRouter model", exact: true }),
+  ).toBeVisible();
 }
 async function voiceTab(page: Page, scope = "Personality settings") {
+  if (
+    await page
+      .getByRole("tablist", { name: "Voice settings", exact: true })
+      .isVisible()
+  )
+    return;
   await page
     .getByRole("tablist", { name: scope, exact: true })
     .getByRole("tab", { name: "Voice & Model", exact: true })
@@ -56,7 +73,7 @@ test("AI input inspection separates call instructions, runtime tools, and Hermes
     inspector.getByText(/No request has been captured/),
   ).toBeVisible();
   await inspector.getByRole("button", { name: "Close Preview" }).click();
-  await page.getByRole("link", { name: "Hermes", exact: true }).click();
+  await navigation(page, "Hermes");
   await expect(
     page.getByRole("heading", { name: "Hermes Integration", exact: true }),
   ).toBeVisible();
@@ -172,7 +189,7 @@ test("personalities share guided and full-text values and preserve edits during 
   );
   await page.getByRole("button", { name: "Try in Playground" }).click();
   await expect(page.getByText("Testing unsaved changes")).toBeVisible();
-  await page.getByRole("link", { name: "Personalities", exact: true }).click();
+  await navigation(page, "Personalities");
   await expect(page.getByLabel("Personality prompt")).toHaveValue(
     "Be thoughtful. Ask about the next chess game.",
   );
@@ -287,7 +304,7 @@ test("compact layout and keyboard focus remain usable at a narrow zoom-equivalen
   await page.setViewportSize({ width: 640, height: 900 });
   await page.goto("/calls");
   await expect(
-    page.getByRole("link", { name: "Calls", exact: true }),
+    page.getByRole("button", { name: "Menu", exact: true }),
   ).toBeVisible();
   await page.keyboard.press("Tab");
   await expect(page.locator(":focus")).toBeVisible();
@@ -614,7 +631,14 @@ test("focused settings preserve edits across sections and keyboard navigation", 
     warned = true;
     await dialog.dismiss();
   });
-  await globalDefaults(page);
+  const picker = page.getByRole("combobox", { name: "Editing", exact: true });
+  if (await picker.isVisible())
+    await picker.selectOption("profile:professional");
+  else
+    await page
+      .locator(".profile-row")
+      .filter({ hasText: "Professional" })
+      .click();
   expect(warned).toBe(true);
   await expect(
     page.getByRole("textbox", { name: "Personality prompt", exact: true }),

@@ -196,9 +196,10 @@ def create_app(
         app.include_router(twilio_webhooks.router)
         app.include_router(debug.router)
     else:
-        from app.routes import control
+        from app.routes import control, reception
 
         app.include_router(control.router)
+        app.include_router(reception.router)
 
         @app.websocket("/phone-media")
         async def phone_media(websocket: WebSocket) -> None:

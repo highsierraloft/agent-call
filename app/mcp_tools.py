@@ -63,9 +63,11 @@ def register_tools(
             return result
 
     if android_backend:
+        from app.reception_mcp import register_reception_tools
         from app.workflow_mcp import register_workflow_tools
 
         register_workflow_tools(mcp, get_service, auth_meta)
+        register_reception_tools(mcp, get_service, auth_meta)
 
     @mcp.tool(
         name="prepare_phone_call",

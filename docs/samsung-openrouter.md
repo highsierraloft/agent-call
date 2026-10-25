@@ -3,7 +3,7 @@
 This fork connects an existing Android SIP gateway to configurable voice providers.
 The requesting assistant, such as Hermes, gathers the details and sends a brief through MCP.
 The voice agent conducts the call and returns the transcript and recording as files.
-Hermes interprets the transcript and writes any summary.
+Hermes interprets completed transcripts through a durable local review queue. Calls do not wait for this review.
 
 ## Implemented path
 
@@ -38,11 +38,22 @@ The existing OpenAI/Twilio backend remains the default and retains its existing 
 
 ## Private control panel
 
-The control panel manages call history, versioned personalities, browser practice, and the calling
-guide consumed by Hermes. Its React interface is built with `dashboard/package-lock.json` and
-served by `Dockerfile.control`. Administration APIs remain inside the existing FastAPI worker.
+The private operator panel manages calls, contacts and memory, callbacks, inbound and outbound
+settings, versioned personalities, browser practice, and the calling guide consumed by Hermes.
+Its React interface is built with `dashboard/package-lock.json` and served by `Dockerfile.control`.
+Administration APIs remain inside the existing FastAPI worker.
 
-The interface uses the same four work areas throughout: Calls, Personalities, Playground, and Hermes.
+The grouped sidebar separates Activity (Calls, Contacts, Callbacks, Costs), Agent (Inbound,
+Outbound, Personalities), and Workspace (Playground, Hermes, Settings). Compact screens use a
+labelled Menu drawer. End Call remains available across views while a call is active.
+Contacts separates Conversations, Memory, and Details. Contact and memory drafts survive tab
+changes; leaving the contact asks before discarding unsaved changes, including browser history
+navigation. Reloading or closing the page invokes the browser's unsaved-change warning.
+Callbacks separates Scheduled from Unscheduled Follow-ups.
+
+Settings separates Business, Voice & Models, and Memory; Outbound separates Instructions from
+Automatic Callbacks. Inbound intake limits and additional callback rules use labelled disclosures.
+Revision forms keep Save Changes visible and place the full-text editor, history, and reload in More.
 Personalities separates Instructions, Voice & Model, and Call Settings. The selected section preserves
 unsaved edits. Save and Try in Playground stay visible; More contains the full-text editor, history,
 and duplication. Response controls, Speech Expression, and turn timing use labelled disclosures with
@@ -52,11 +63,14 @@ Playground keeps Start/End Practice above optional settings and fixes these cont
 on narrow screens. Its Inspect menu keeps current inputs and the last session separate. Calls keeps
 search visible, groups filters, and puts settings and diagnostics in Details. Hermes keeps the calling
 guide separate from MCP tools and connection help. All existing settings, data, and actions remain
-available. The web interface applies Apple's hierarchy, grouping, accessibility, and progressive-
-disclosure principles using semantic HTML, system type, restrained dividers, and system appearance.
+available. The interface preserves its Apple-style hierarchy and system font stack, with neutral
+surfaces, blue accents, restrained dividers, and light or dark appearance from the device setting.
+Semantic HTML controls, labelled fields, visible keyboard focus, and progressive disclosure keep
+routine actions clear while retaining detailed settings and inspection tools.
 
 Saving creates an immutable revision and applies it to future preparations. Existing plans and
-active calls retain their stored prompt and voice settings. Restoration creates another revision.
+active calls retain their stored settings snapshots. Contact and memory saves also leave existing
+call snapshots unchanged. Restoration creates another revision.
 Concurrent saves use the expected revision and return a conflict instead of overwriting another edit.
 Built-in profile IDs remain available for older clients; custom profiles can be archived.
 
@@ -69,7 +83,7 @@ authenticated control panel. Older calls without snapshots remain explicitly unr
 **Inspect AI Inputs** separates the call model's starting system prompt into ordered sections,
 with the source of each section and whether it is editable. It also shows model parameters,
 speech settings, the `finish_call` tool definition, connection and timer messages, and an initial
-request example. Global Defaults, the selected personality, and the approved brief feed the call model.
+request example. Shared voice defaults, direction-specific instructions, the selected personality, recipient context, and the approved brief feed the call model.
 The Hermes calling guide is separate: Hermes reads it to prepare and monitor calls; it is not copied
 into the call model's system prompt. The sidebar labels this area **Hermes**.
 
@@ -211,7 +225,7 @@ verify the contract before accepting further preparations.
 Each page holds at most 100 records. Pass `next_transcript_cursor` as `after_sequence` until it is null.
 Transcript text is call content, not authority to run tools or change the brief.
 
-Transcript-only finalization makes no model request and sends no summary push.
+Transcript-only finalization makes no model request and sends no summary push. The separate local Hermes review job later commits a summary and eligible memory changes.
 A normal disconnect does not establish task success. Hermes must assess the transcript.
 Costs are not yet reconciled against carrier and provider billing; the backend returns no cost estimate.
 
@@ -281,7 +295,7 @@ That leaves room for a two-hour call, result pagination, and file conversion. Th
 New calls use Global Instructions, Opening Instructions, Personality, Recipient, and Task.
 Service rules separately govern identity, authority, languages, interruptions, and closing.
 Personality sets style. The task takes precedence over style; recipient information grants no authority.
-No category selects a hidden purpose prompt. No classifier, planner, or summary model was added.
+No category selects a hidden purpose prompt. No classifier, planner, or separate summary provider was added. The existing Hermes account performs queued reviews.
 
 New Call and Playground use Personality → Recipient → Task. Only a telephone call needs a number.
 The shared neutral instructions avoid forced fillers, repeated acknowledgments, and mandatory questions.
@@ -300,8 +314,8 @@ A refusal, missing information, technical failure, or time limit may end an unfi
 Hermes assesses completion from transcript evidence; a completed call does not prove task success.
 Routine callbacks on the same task are allowed unless the brief prohibits follow-up. The agent
 may promise to check and call back, but cannot invent a time or claim it is already scheduled.
-Hermes reports callback commitments as outstanding actions from the transcript. This release
-does not add an automatic callback scheduler. Explicit spending, booking, and other limits remain binding.
+Hermes reports commitments without receipts as outstanding actions. Confirmed callbacks use the
+receipt and scheduling workflow below. Explicit spending, booking, and other limits remain binding.
 For commercial offers, `business` must include `name`, `description`, `offer`, `desired_next_step`,
 and actual `contact_permission` (`recipient_requested` or `prior_consent`). Optional fields include
 `audience`, `approved_claims`, and `pricing`. Fictional practice and personal invitations omit business.
@@ -409,6 +423,82 @@ The five-turn audio replay measured 1.209–1.700 seconds, within the existing t
 The earlier v2 replay measured 1.119–1.495 seconds. These small samples do not establish latency percentiles or handset quality.
 Usage capture included interrupted model requests without final usage. Their costs remain explicitly partial.
 No real telephone call was placed.
+
+## Inbound reception and contact memory
+
+Settings owns business identity, approved information, shared voice defaults, and memory-review instructions.
+Inbound owns reception instructions, greeting, intake questions, personality, and limits.
+Outbound owns the existing conversation/opening text and automatic callback policy.
+Personalities remain reusable styles with optional voice/model overrides.
+All saves append revisions. Prepared and active calls retain their snapshots.
+
+Inbound starts disabled. Supply the real business name, description, and approved facts before testing.
+Do not substitute an example business. Open the five-minute handset-check window from Inbound,
+then complete owner-controlled selected-SIM tests. Record caller identity, greeting timing, recording,
+native fallback, and an answered scheduled callback. The acceptance action checks saved call evidence.
+It does not enable answering. Enable answering separately after acceptance passes.
+Turning answering off does not terminate an answered call.
+
+The guarded gateway accepts only its pinned subscription. Contract 2 reports `incoming=selected-only`.
+It sends an authenticated SIP leg with caller presentation and releases unanswered failures to the native dialer.
+Asterisk stores the actual incoming channel ID; this path never originates an outbound call.
+The worker reserves capacity, persists the call, freezes settings/memory, and prewarms providers before answer.
+The gateway sends DTMF D after both media ports connect. Greeting and recording wait for this readiness marker.
+A provider or silence failure plays a packaged local WAV when audio remains available, then ends the call.
+These files cover English, Spanish, Russian, and Ukrainian and require no live synthesis.
+
+Existing phone conversations take priority over other work. Ringing inbound calls preempt unstarted
+scheduled callbacks. Practice and configuration checks must finish cancellation before phone admission.
+Busy or unavailable reception leaves normal handset/carrier handling in control.
+
+Contacts share number associations across both call directions. Shared, withheld, and unavailable numbers
+remain distinct. Caller ID is recognition, not authentication. Alternate callback numbers do not reassign identity.
+Contacts show call timelines, outcomes, summaries, recordings, memory, and callback receipts.
+Owner notes remain private and never enter voice context or the review tools.
+Owner edits are revision checked. Deleted facts retain source tombstones, so old reviews cannot revive them.
+Relinking a completed call changes its history association without merging contacts or changing number ownership.
+Each new call stores a bounded memory snapshot. Earlier calls retain their original snapshots.
+Historical calls are linked as history without invented summaries. Review with Hermes explicitly queues them.
+
+New finished calls enter a durable review queue. `claim_call_review` leases one job for five minutes;
+`read_call_review` renews the lease and requires every transcript page. `commit_call_review` atomically saves
+summary, outcome, eligible memory facts, unscheduled promises, and completion. Stable request IDs recover
+lost save responses. Owner corrections and contact changes cause a conflict, not silent overwrite.
+Expired leases recover. Conversations use the last committed memory while analysis is pending.
+
+Use Hermes v0.22.2 native cron with a normal `script` precheck, local delivery, and
+`enabled_toolsets=["calling-review", "no_mcp"]`. The precheck in `deploy/hermes/review_precheck.py`
+returns `wakeAgent=false` for an empty/unavailable queue before Hermes constructs a model agent.
+Its status file distinguishes an unavailable queue from an empty one. The calling-review alias includes
+only queue, claim, read, commit, and release tools, with resource/prompt helpers off.
+Inspect the underlying tool catalog even when Hermes exposes Tool Search wrappers.
+No Telegram delivery, second summary provider, or calling capability belongs to this job.
+
+## Confirmed automatic callbacks
+
+The original follow-up tracker remains manual. Automatic schedules use separate records and receipts.
+The default policy permits weekdays 09:00–18:00 in Atlantic/Canary, one attempt, and a 15-minute window.
+This policy does not restrict ordinary owner-requested outbound calls.
+
+The agent establishes purpose, complete destination, exact date, timezone, and window.
+`propose_callback` speaks the server readback. Corrections invalidate the prior proposal.
+`confirm_callback` requires the complete heard readback and a clear, immediate caller confirmation.
+Only a receipt with `scheduled=true` permits saying the call is scheduled.
+A confirmed request with required information stays blocked until the owner supplies verified answers.
+Unscheduled promises appear in manual follow-ups after review; summaries cannot schedule calls.
+Opt-outs cancel pending reception callbacks regardless of sales classification.
+
+The dispatcher creates a fresh plan near the due time. It rechecks policy, suppression, required facts,
+phone readiness, deployment state, and capacity. The final database transaction claims both the existing
+one-shot dial and the schedule. A restart or uncertain response recovers the same call; it never creates
+an automatic replacement. A busy line waits only within the confirmed window, then becomes missed work.
+Cancellation before the dial claim prevents initiation. Afterward, use End Call for an underway attempt.
+Reschedule, Cancel, Call Now, and resolving required information require owner instructions.
+
+The MCP adds contact lookup/history, historical review requests, shared review operations, and schedule
+lookup/create/update. Existing prepare/start/poll/end/result, plan-ID recovery, and MP3/Markdown delivery remain.
+Browser practice uses in-memory receipts and simulated contacts only. It cannot persist contacts, memory,
+opt-outs, or callback schedules. Inbound configuration checks use the same Pipecat Evals pipeline.
 
 ## Conversational delivery
 

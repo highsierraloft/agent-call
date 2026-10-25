@@ -5,7 +5,6 @@ import {
   History,
   Code2,
   AudioLines,
-  Settings2,
   FileText,
   Archive,
 } from "lucide-react";
@@ -105,7 +104,6 @@ export default function Profiles({
         <label className="profile-picker">
           Editing
           <select value={entity} onChange={(e) => selectEntity(e.target.value)}>
-            <option value="global">Global Defaults</option>
             {fresh && !profiles.some((p) => p.entity === fresh.entity) && (
               <option value={fresh.entity}>{fresh.value.name}</option>
             )}
@@ -119,16 +117,10 @@ export default function Profiles({
             </optgroup>
           </select>
         </label>
-        <button
-          className={"profile-row " + (entity === "global" ? "selected" : "")}
-          onClick={() => selectEntity("global")}
-        >
-          <Settings2 size={18} />
-          <span>
-            Global Defaults<small>Shared defaults for every personality</small>
-          </span>
-        </button>
-        <div className="list-divider" />
+        <p className="muted inset">
+          Speaking style for incoming and outgoing calls. Shared voices and
+          models are in Settings.
+        </p>
         {profiles.map((p) => (
           <button
             className={"profile-row " + (p.entity === entity ? "selected" : "")}

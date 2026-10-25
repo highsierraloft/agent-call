@@ -7,6 +7,8 @@ import json
 import secrets
 from typing import TYPE_CHECKING, Any
 
+import aiosqlite
+
 from app.db.control import RevisionConflict
 from app.db.engine import _iso_now
 
@@ -51,6 +53,47 @@ def workflow_row(row: Any) -> dict[str, Any] | None:
     return result
 
 
+async def save_manual_followups(
+    conn: aiosqlite.Connection, call_id: str, drafts: list[dict[str, Any]], actor: str, now: str
+) -> list[str]:
+    callbacks: list[str] = []
+    for callback in drafts:
+        cursor = await conn.execute(
+            "SELECT followup_id FROM call_followups WHERE source_call_id=? AND source_key=?",
+            (call_id, callback["source_key"]),
+        )
+        existing = await cursor.fetchone()
+        if existing:
+            # A later assessment never resets work someone already edited or completed.
+            callbacks.append(existing["followup_id"])
+            continue
+        followup_id = "followup_" + secrets.token_urlsafe(16)
+        state = "needs_information" if callback["needed_information"] else "ready"
+        encoded_callback = json.dumps(
+            {**callback, "status": state, "note": "", "completion_call_id": None},
+            ensure_ascii=False,
+        )
+        await conn.execute(
+            "INSERT INTO call_followups VALUES (?,?,?,1,?,?,?,?,?)",
+            (
+                followup_id,
+                call_id,
+                callback["source_key"],
+                state,
+                encoded_callback,
+                now,
+                now,
+                actor,
+            ),
+        )
+        await conn.execute(
+            "INSERT INTO call_followup_history VALUES (?,1,?,?,?)",
+            (followup_id, encoded_callback, actor, now),
+        )
+        callbacks.append(followup_id)
+    return callbacks
+
+
 class WorkflowMixin:
     async def workflow_assessment(self: DatabaseAccess, call_id: str) -> dict[str, Any] | None:
         return workflow_row(
@@ -77,6 +120,15 @@ class WorkflowMixin:
                     raise ValueError("This request ID was already used for different content")
                 result: dict[str, Any] = json.loads(saved["result_json"])
                 return result
+            if actor == "hermes":
+                cursor = await conn.execute(
+                    "SELECT 1 FROM reception_reviews WHERE call_id=? UNION ALL SELECT 1 FROM call_contacts WHERE call_id=? AND automatic_review=1 LIMIT 1",
+                    (call_id, call_id),
+                )
+                if await cursor.fetchone():
+                    raise ValueError(
+                        "Use claim_call_review and commit_call_review for this call; a separate outcome save cannot bypass its review lease"
+                    )
             cursor = await conn.execute(
                 "SELECT COALESCE(MAX(revision),0) FROM call_assessments WHERE call_id=?", (call_id,)
             )
@@ -96,41 +148,9 @@ class WorkflowMixin:
                 "INSERT INTO call_assessments VALUES (?,?,?,?,?)",
                 (call_id, revision + 1, json.dumps(value, ensure_ascii=False), actor, now),
             )
-            callbacks = []
-            for callback in payload.get("callbacks", []):
-                cursor = await conn.execute(
-                    "SELECT followup_id FROM call_followups WHERE source_call_id=? AND source_key=?",
-                    (call_id, callback["source_key"]),
-                )
-                existing = await cursor.fetchone()
-                if existing:
-                    # A later assessment never resets work someone already edited or completed.
-                    callbacks.append(existing["followup_id"])
-                    continue
-                followup_id = "followup_" + secrets.token_urlsafe(16)
-                state = "needs_information" if callback["needed_information"] else "ready"
-                encoded_callback = json.dumps(
-                    {**callback, "status": state, "note": "", "completion_call_id": None},
-                    ensure_ascii=False,
-                )
-                await conn.execute(
-                    "INSERT INTO call_followups VALUES (?,?,?,1,?,?,?,?,?)",
-                    (
-                        followup_id,
-                        call_id,
-                        callback["source_key"],
-                        state,
-                        encoded_callback,
-                        now,
-                        now,
-                        actor,
-                    ),
-                )
-                await conn.execute(
-                    "INSERT INTO call_followup_history VALUES (?,1,?,?,?)",
-                    (followup_id, encoded_callback, actor, now),
-                )
-                callbacks.append(followup_id)
+            callbacks = await save_manual_followups(
+                conn, call_id, payload.get("callbacks", []), actor, now
+            )
             result = {"call_id": call_id, "revision": revision + 1, "followup_ids": callbacks}
             await conn.execute(
                 "INSERT INTO call_review_requests VALUES (?,?,?,?)",

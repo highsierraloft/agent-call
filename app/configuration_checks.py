@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 import uvicorn
 from fastapi import FastAPI, WebSocket
 
+from app.callback_voice import PracticeCallbacks
 from app.db.deployment import _lock_is_active
 from app.models import ContextPacket
 
@@ -36,6 +37,18 @@ CASE_NAMES = [
     "language_switching",
     "premature_ending",
 ]
+INBOUND_CASE_NAMES = [
+    "inbound_intake",
+    "inbound_returning",
+    "inbound_missing_facts",
+    "inbound_injection",
+    "inbound_language",
+    "inbound_callback",
+]
+
+
+def scenario_names(configuration: dict[str, Any]) -> list[str]:
+    return INBOUND_CASE_NAMES if configuration.get("direction") == "inbound" else CASE_NAMES
 
 
 def check_judge(config: dict[str, Any]) -> Any:
@@ -92,7 +105,7 @@ class ConfigurationChecks:
             )
             if lease and lease["locked"] and _lock_is_active(lease["locked_at"]):
                 raise ValueError("The calling service is being updated. Try again shortly.")
-            configuration = await self.control.resolve(packet, overrides=overrides)
+            packet, configuration = await self.control.practice_snapshot(packet, overrides)
             behavior = {k: configuration[k] for k in ["prompts", "personality_prompt", "voice"]}
             configuration["check_fingerprint"] = hashlib.sha256(
                 json.dumps(behavior, sort_keys=True).encode()
@@ -136,8 +149,8 @@ class ConfigurationChecks:
             "error": row["error"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
-            "scenario_count": len(CASE_NAMES),
-            "scenario_names": CASE_NAMES,
+            "scenario_count": len(scenario_names(json.loads(row["configuration_json"]))),
+            "scenario_names": scenario_names(json.loads(row["configuration_json"])),
             "judge_model": JUDGE_MODEL,
             "scope": "Synthetic text conversations through the voice pipeline. No telephone is dialed. This checks prompt/model behavior, not audible quality or carrier latency. Provider usage applies and is separate from telephone cost totals.",
         }
@@ -174,7 +187,7 @@ class ConfigurationChecks:
                 await self._execute(job)
             job.state = (
                 "passed"
-                if len(job.results) == len(CASE_NAMES)
+                if len(job.results) == len(scenario_names(job.configuration))
                 and all(r["status"] in {"passed", "skipped"} for r in job.results)
                 else "failed"
             )
@@ -208,13 +221,14 @@ class ConfigurationChecks:
         from app.android_voice import AndroidVoiceSession, VoiceCallbacks
 
         raw = yaml.safe_load((Path(__file__).with_name("check_scenarios.yaml")).read_text())
-        cases = [c for name in CASE_NAMES for c in raw["cases"] if c["name"] == name]
-        if len(cases) != len(CASE_NAMES):
+        names = scenario_names(job.configuration)
+        cases = [c for name in names for c in raw["cases"] if c["name"] == name]
+        if len(cases) != len(names):
             raise ValueError("The check scenario set is incomplete")
         config = self.control.runtime_config(job.configuration)
         allowed = set(config.conversation_languages)
         for case in cases:
-            if case["name"] == "language_switching":
+            if case["name"] in {"language_switching", "inbound_language"}:
                 codes = ["en", "es", "ru", "uk", "en"]
                 case["turns"] = [
                     turn
@@ -255,6 +269,12 @@ class ConfigurationChecks:
             )
             snapshot = copy.deepcopy(job.configuration)
             snapshot.pop("effective_prompt", None)
+            if snapshot.get("direction") == "inbound":
+                packet = packet.model_copy(update={"direction": "inbound"})
+            if case.get("personality_prompt"):
+                snapshot["personality_prompt"] = case["personality_prompt"]
+            if case.get("memory"):
+                snapshot["contact_memory"] = case["memory"]
             packet = self.control.normalize_packet(packet, snapshot)
             self.control.freeze_inputs(packet, snapshot)
             transport = EvalFastAPIWebsocketTransport(
@@ -275,6 +295,11 @@ class ConfigurationChecks:
             async def suppress_recipient() -> None:
                 return None
 
+            callbacks = PracticeCallbacks(snapshot["callback_policy"], packet.language or "en")
+
+            def observed(speaker: str, text: str, source: str, interrupted: bool) -> None:
+                callbacks.observe(speaker, text, interrupted)
+
             voice = AndroidVoiceSession(
                 ws,
                 call_id=job.id + "_" + name,
@@ -285,7 +310,11 @@ class ConfigurationChecks:
                 browser=True,
                 transport=transport,
                 callbacks=VoiceCallbacks(
-                    lambda *args: None, lambda: errors.add(name), finish, suppress_recipient
+                    observed,
+                    lambda: errors.add(name),
+                    finish,
+                    suppress_recipient,
+                    callback_tool=callbacks.tool,
                 ),
             )
             task = asyncio.create_task(voice.run())
@@ -308,7 +337,7 @@ class ConfigurationChecks:
             with TemporaryDirectory(prefix="calling-check-") as temporary:
                 for case in cases:
                     name = case["name"]
-                    if name == "language_switching" and len(allowed) < 2:
+                    if name in {"language_switching", "inbound_language"} and len(allowed) < 2:
                         job.results.append(
                             {
                                 "name": name,

@@ -49,6 +49,11 @@ export interface Revision<T> {
   created_at: string;
 }
 export interface Setup {
+  reception?: {
+    business: BusinessSettings;
+    inbound: InboundSettings;
+    callback_policy: CallbackPolicy;
+  };
   guide: string;
   guide_revision: number;
   owner: { display_name: string; timezone: string };
@@ -70,6 +75,12 @@ export interface Session {
   setup: Setup;
 }
 export interface Status {
+  inbound?: {
+    answering_on: boolean;
+    availability: string;
+    reason: string | null;
+    business_configured: boolean;
+  };
   ready: boolean;
   sip_registered: boolean;
   source_line: string;
@@ -81,6 +92,7 @@ export interface Status {
   last_hermes_request: { observed_at: string } | null;
 }
 export interface Brief {
+  direction?: "inbound" | "outbound";
   owner: { display_name: string; timezone: string };
   target: {
     name: string;
@@ -108,6 +120,7 @@ export interface Brief {
   };
 }
 export interface Call {
+  direction?: "inbound" | "outbound";
   call_id: string;
   state: string;
   outcome_status?: OutcomeStatus | null;
@@ -193,6 +206,14 @@ export interface AIInputInspection {
   saved_system_prompt?: string | null;
 }
 export interface Detail {
+  direction?: "inbound" | "outbound";
+  contact?: {
+    contact_id: string | null;
+    recognition: string;
+    memory_snapshot: unknown;
+  } | null;
+  summary?: Revision<{ text: string; outcome: string }> | null;
+  review?: { state: string; error?: string | null } | null;
   call_id: string;
   state: string;
   transcript: Turn[];
@@ -216,6 +237,7 @@ export interface Detail {
   artifacts: { audio_status: string; files: { name: string }[] };
 }
 export interface Practice {
+  callback_previews?: ScheduledCallback[];
   id: string;
   mode: "voice" | "text";
   state: string;
@@ -224,7 +246,88 @@ export interface Practice {
   error: string | null;
   configuration: Snapshot;
 }
+
+export interface BusinessSettings {
+  name: string;
+  description: string;
+  approved_facts: string[];
+  timezone: string;
+  memory_review_instructions: string;
+}
+export interface InboundSettings {
+  enabled: boolean;
+  instructions: string;
+  greeting: string;
+  intake_questions: string[];
+  profile_id: string;
+  language: Language;
+  max_call_seconds: number;
+  silence_seconds: number;
+}
+export interface CallbackPolicy {
+  enabled: boolean;
+  timezone: string;
+  weekdays: number[];
+  opens: string;
+  closes: string;
+  default_window_minutes: number;
+  max_window_minutes: number;
+  allow_alternate_number: boolean;
+  attempts: 1;
+}
+export interface MemoryFact {
+  key: string;
+  text: string;
+  evidence_turn_ids: string[];
+  source_call_id: string | null;
+  owner_protected: boolean;
+}
+export interface Contact {
+  contact_id: string;
+  revision: number;
+  name: string;
+  background: string;
+  private_note?: string;
+  call_count?: number;
+  numbers: { phone: string; source: string; confirmed: boolean }[];
+  memory: { revision: number; facts: MemoryFact[]; removed_keys: string[] };
+  calls: {
+    call_id: string;
+    state: string;
+    direction: string;
+    created_at: string;
+    summary: { text: string; outcome: string } | null;
+    review_state: string | null;
+  }[];
+  next_offset: number | null;
+  callbacks: ScheduledCallback[];
+}
+export interface ScheduledCallback {
+  schedule_id: string;
+  revision: number;
+  state: string;
+  destination: string;
+  window_start: string;
+  window_end: string;
+  source_call_id: string;
+  call_id: string | null;
+  reason: string | null;
+  dial_claimed: number;
+  value: {
+    objective: string;
+    timezone: string;
+    window_start: string;
+    window_end: string;
+    request_key: string;
+    alternate_number: boolean;
+    needed_information?: string[];
+    new_facts?: string[];
+    language?: Language;
+  };
+}
 export interface Draft {
+  direction?: "inbound" | "outbound";
+  inbound?: InboundSettings;
   profileId: string;
   global?: Global;
   profile?: Profile;

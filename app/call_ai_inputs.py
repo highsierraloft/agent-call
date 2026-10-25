@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
+from zoneinfo import ZoneInfo
 
 if TYPE_CHECKING:
     from app.android_config import AndroidConfig
@@ -31,7 +32,15 @@ def time_notice(remaining_seconds: int, *, closing: bool = False) -> str:
     )
 
 
-def model_tools(mode: Mode = "voice") -> list[dict[str, Any]]:
+def scheduling_clock(timezone: str, now: datetime | None = None) -> str:
+    local = (now or datetime.now(UTC)).astimezone(ZoneInfo(timezone))
+    return (
+        f"Current scheduling time: {local:%A %Y-%m-%d %H:%M:%S %z} ({timezone}). "
+        "Ask for the caller's timezone when needed. Confirm the exact date and window; do not guess what an ambiguous time means."
+    )
+
+
+def model_tools(mode: Mode = "voice", *, callbacks_enabled: bool = False) -> list[dict[str, Any]]:
     function: dict[str, Any] = {
         "name": "finish_call",
         "description": "End the call ONLY when the recipient explicitly asks to finish, the approved task is complete, or the runtime closing notice arrives. Never use this tool for ordinary conversational replies or mentions of later plans. It speaks your farewell, then hangs up after playback and a reply window. Do not say the farewell separately.",
@@ -44,7 +53,7 @@ def model_tools(mode: Mode = "voice") -> list[dict[str, Any]]:
                 },
                 "do_not_call": {
                     "type": "boolean",
-                    "description": "Set true only when the recipient requests no further sales calls. This saves an opt-out for this recipient before closing; it does not update an external customer system.",
+                    "description": "Set true when the recipient requests no further calls, including reception callbacks. This saves an opt-out before closing; it does not update an external customer system.",
                 },
             },
             "required": ["farewell"],
@@ -56,7 +65,11 @@ def model_tools(mode: Mode = "voice") -> list[dict[str, Any]]:
             "farewell": {"type": "string"},
             "do_not_call": {"type": "boolean"},
         }
-    return [{"type": "function", "function": function}]
+    from app.callback_voice import callback_tools
+
+    return [{"type": "function", "function": function}] + (
+        callback_tools() if callbacks_enabled else []
+    )
 
 
 def model_options(config: AndroidConfig, mode: Mode = "voice") -> dict[str, Any]:
@@ -103,33 +116,34 @@ def initial_messages(prompt: str, mode: Mode = "voice") -> list[Any]:
 def describe_inputs(
     packet: ContextPacket, snapshot: dict[str, Any], config: AndroidConfig, mode: Mode = "voice"
 ) -> dict[str, Any]:
-    from app.voice_prompts import voice_prompt_sections
+    from app.reception_prompts import effective_sections
 
-    sections = voice_prompt_sections(
-        packet,
-        conversation_languages=list(config.conversation_languages),
-        prompts=snapshot["prompts"],
-        personality_prompt=snapshot["personality_prompt"],
-    )
+    sections = effective_sections(packet, snapshot)
     prompt = snapshot["effective_prompt"]
     options = model_options(config, mode)
     messages = initial_messages(prompt, mode)
+    tools = model_tools(mode, callbacks_enabled=bool(snapshot.get("callback_policy")))
     if mode == "voice":
         messages[0]["content"] += "\n" + time_notice(
             config.call_duration(packet.max_duration_seconds)
         )
     else:
         messages.append({"role": "user", "content": "<your next practice message>"})
+    if snapshot.get("callback_policy"):
+        messages[0]["content"] += "\n" + scheduling_clock(snapshot["callback_policy"]["timezone"])
     return {
         "version": 1,
         "mode": mode,
         "system_prompt": prompt,
         "prompt_sections": sections,
         "model_options": options,
-        "tools": model_tools(mode),
-        "initial_request_example": {**options, "messages": messages, "tools": model_tools(mode)},
+        "tools": tools,
+        "initial_request_example": {**options, "messages": messages, "tools": tools},
         "runtime_messages": {
             "connection_event": CONNECTION_EVENT if mode == "voice" else None,
+            "scheduling_clock": "Current date, time, UTC offset, and callback timezone. Refreshed each turn."
+            if snapshot.get("callback_policy")
+            else None,
             "continuing_timer_template": TIMER_PREFIX + TIMER_CONTINUE if mode == "voice" else None,
             "closing_timer_template": TIMER_PREFIX + TIMER_CLOSING if mode == "voice" else None,
             "timer_placement": "Appended to the first system message; remaining time changes each turn."

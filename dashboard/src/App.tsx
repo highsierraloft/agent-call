@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useState, lazy, Suspense } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+  useRef,
+  lazy,
+  Suspense,
+} from "react";
 import {
   AudioLines,
   Phone,
@@ -8,20 +15,57 @@ import {
   Radio,
   CheckCircle2,
   Square,
+  Users,
+  CalendarClock,
+  Wallet,
+  PhoneIncoming,
+  PhoneOutgoing,
+  Settings,
+  Menu,
+  X,
 } from "lucide-react";
 import { api, message, setCsrf } from "./api";
 import type { Brief, Draft, Session, Status } from "./types";
-import Calls from "./CallsWorkspace";
+import Calls from "./Calls";
+import Contacts from "./Contacts";
+import Callbacks from "./Callbacks";
+import Costs from "./Costs";
+import {
+  WorkspaceSettings,
+  InboundSettingsPage,
+  OutboundSettings,
+} from "./AgentSettings";
 import Profiles from "./Profiles";
 const Playground = lazy(() => import("./Playground"));
 import Integration from "./Integration";
 import NewCall from "./NewCall";
 
 const sections = [
-  { id: "calls", label: "Calls", icon: Phone },
-  { id: "personalities", label: "Personalities", icon: SlidersHorizontal },
-  { id: "playground", label: "Playground", icon: AudioLines },
-  { id: "integration", label: "Hermes", icon: Plug },
+  { id: "calls", label: "Calls", icon: Phone, group: "Activity" },
+  { id: "contacts", label: "Contacts", icon: Users, group: "Activity" },
+  {
+    id: "callbacks",
+    label: "Callbacks",
+    icon: CalendarClock,
+    group: "Activity",
+  },
+  { id: "costs", label: "Costs", icon: Wallet, group: "Activity" },
+  { id: "inbound", label: "Inbound", icon: PhoneIncoming, group: "Agent" },
+  { id: "outbound", label: "Outbound", icon: PhoneOutgoing, group: "Agent" },
+  {
+    id: "personalities",
+    label: "Personalities",
+    icon: SlidersHorizontal,
+    group: "Agent",
+  },
+  {
+    id: "playground",
+    label: "Playground",
+    icon: AudioLines,
+    group: "Workspace",
+  },
+  { id: "integration", label: "Hermes", icon: Plug, group: "Workspace" },
+  { id: "settings", label: "Settings", icon: Settings, group: "Workspace" },
 ];
 export default function App() {
   const [path, setPath] = useState(location.pathname),
@@ -33,6 +77,15 @@ export default function App() {
     [followupId, setFollowupId] = useState<string>(),
     [draft, setDraft] = useState<Draft>();
   const [ending, setEnding] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const pathRef = useRef(path);
+  pathRef.current = path;
+  const drawer = useRef<HTMLDialogElement>(null),
+    menuButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (menuOpen) drawer.current?.showModal();
+    else drawer.current?.close();
+  }, [menuOpen]);
   useEffect(() => {
     if (!status?.active_call) setEnding(false);
   }, [status?.active_call]);
@@ -51,6 +104,16 @@ export default function App() {
     () => new Set([location.pathname.split("/")[1] || "calls"]),
   );
   const navigate = useCallback((next: string) => {
+    setMenuOpen(false);
+    if (
+      !window.dispatchEvent(
+        new CustomEvent("calling-navigation", {
+          cancelable: true,
+          detail: next,
+        }),
+      )
+    )
+      return;
     history.pushState({}, "", next);
     setPath(next);
     setVisited((v) => new Set([...v, next.split("/")[1] || "calls"]));
@@ -63,6 +126,17 @@ export default function App() {
   useEffect(() => {
     refresh().catch((e) => setError(message(e)));
     const pop = () => {
+      if (
+        !window.dispatchEvent(
+          new CustomEvent("calling-navigation", {
+            cancelable: true,
+            detail: location.pathname,
+          }),
+        )
+      ) {
+        history.pushState({}, "", pathRef.current);
+        return;
+      }
       setPath(location.pathname);
       setVisited(
         (v) => new Set([...v, location.pathname.split("/")[1] || "calls"]),
@@ -90,9 +164,54 @@ export default function App() {
     };
   }, [session]);
   const section =
-    sections.find((s) => path.split("/")[1] === s.id) || sections[0];
+    sections.find(
+      (s) =>
+        (path === "/calls/costs"
+          ? "costs"
+          : path === "/calls/followups"
+            ? "callbacks"
+            : path.split("/")[1]) === s.id,
+    ) || sections[0];
+  const navigation = (
+    <nav aria-label="Main navigation">
+      {["Activity", "Agent", "Workspace"].map((group) => (
+        <section className="nav-group" key={group}>
+          <h2>{group}</h2>
+          {sections
+            .filter((s) => s.group === group)
+            .map((s) => (
+              <a
+                key={s.id}
+                href={"/" + s.id}
+                aria-current={section.id === s.id ? "page" : undefined}
+                onClick={(e) => {
+                  e.preventDefault();
+                  navigate("/" + s.id);
+                }}
+              >
+                <s.icon size={19} />
+                <span>{s.label}</span>
+              </a>
+            ))}
+        </section>
+      ))}
+    </nav>
+  );
   const openCall = (brief?: Brief, callbackId?: string) => {
-    setReuse(brief);
+    setReuse(
+      brief
+        ? {
+            ...brief,
+            direction: "outbound",
+            target: {
+              ...brief.target,
+              phone: brief.target.phone.startsWith("+")
+                ? brief.target.phone
+                : "",
+            },
+          }
+        : undefined,
+    );
     setFollowupId(callbackId);
     setNewCall(true);
   };
@@ -138,29 +257,51 @@ export default function App() {
           <AudioLines size={27} />
           <span>Calling Agent</span>
         </a>
-        <nav aria-label="Main navigation">
-          {sections.map((s) => (
-            <a
-              key={s.id}
-              href={"/" + s.id}
-              aria-current={section.id === s.id ? "page" : undefined}
-              onClick={(e) => {
-                e.preventDefault();
-                navigate("/" + s.id);
-              }}
-            >
-              <s.icon size={19} />
-              <span>{s.label}</span>
-            </a>
-          ))}
-        </nav>
+        {navigation}
         <div className="sidebar-bottom">
           <strong>Spanish DIGI</strong>
           <small>Phone line</small>
         </div>
       </aside>
+      <dialog
+        className="navigation-drawer"
+        id="workspace-navigation"
+        ref={drawer}
+        onClose={() => {
+          setMenuOpen(false);
+          menuButton.current?.focus();
+        }}
+        aria-label="Workspace navigation"
+      >
+        <div className="section-heading">
+          <strong>Calling Agent</strong>
+          <button
+            aria-label="Close navigation"
+            className="icon-button"
+            onClick={() => setMenuOpen(false)}
+          >
+            <X size={20} />
+          </button>
+        </div>
+        {navigation}
+        {status?.active_call && (
+          <button className="danger" disabled={ending} onClick={endActive}>
+            End Active Call
+          </button>
+        )}
+      </dialog>
       <main className="workspace">
         <header className="app-toolbar">
+          <button
+            className="navigation-menu"
+            ref={menuButton}
+            aria-expanded={menuOpen}
+            aria-controls="workspace-navigation"
+            onClick={() => setMenuOpen(true)}
+          >
+            <Menu size={18} />
+            Menu
+          </button>
           <h1>
             {section.id === "integration"
               ? "Hermes Integration"
@@ -210,11 +351,7 @@ export default function App() {
             <button
               className={section.id === "calls" ? "primary" : ""}
               onClick={() => openCall()}
-              disabled={
-                !!status?.active_call ||
-                !!status?.practice_active ||
-                !!status?.check_active
-              }
+              disabled={!!status?.active_call}
             >
               <Plus size={16} />
               New Call
@@ -248,6 +385,35 @@ export default function App() {
             navigate={navigate}
             onNew={openCall}
           />
+        )}
+        {section.id === "contacts" && (
+          <Contacts selected={path.split("/")[2]} navigate={navigate} />
+        )}
+        {section.id === "callbacks" && (
+          <Callbacks session={session} navigate={navigate} onNew={openCall} />
+        )}
+        {section.id === "costs" && (
+          <Costs session={session} navigate={navigate} />
+        )}
+        {visited.has("inbound") && (
+          <div className="section-container" hidden={section.id !== "inbound"}>
+            <InboundSettingsPage
+              session={session}
+              status={status}
+              onSaved={refresh}
+              onTest={testDraft}
+            />
+          </div>
+        )}
+        {visited.has("outbound") && (
+          <div className="section-container" hidden={section.id !== "outbound"}>
+            <OutboundSettings onSaved={refresh} />
+          </div>
+        )}
+        {visited.has("settings") && (
+          <div className="section-container" hidden={section.id !== "settings"}>
+            <WorkspaceSettings onSaved={refresh} />
+          </div>
         )}
         {visited.has("personalities") && (
           <div

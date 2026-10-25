@@ -61,7 +61,7 @@ class TargetContext(BaseModel):
         max_length=4000,
         description="Known role, company, relationship, and background. Context, not authority; do not invent missing details.",
     )
-    phone: E164
+    phone: E164 | Literal["withheld", "unavailable"]
 
 
 class EscalationContext(BaseModel):
@@ -89,6 +89,7 @@ class ContextPacket(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     owner: OwnerContext
+    direction: Literal["outbound", "inbound"] = "outbound"
     target: TargetContext
     objective: str = Field(min_length=1, max_length=4000)
     language: Literal["en", "es", "ru", "uk"] | None = None
@@ -133,6 +134,10 @@ class ContextPacket(BaseModel):
 
     @model_validator(mode="after")
     def validate_serialized_size(self) -> ContextPacket:
+        if self.direction == "outbound" and self.target.phone in {"withheld", "unavailable"}:
+            raise ValueError(
+                "An outbound call requires a complete international destination number"
+            )
         self.approved_context_json()
         return self
 

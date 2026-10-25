@@ -4,7 +4,6 @@ import asyncio
 import json
 from pathlib import Path
 
-import pytest
 import yaml
 
 from app.configuration_checks import CASE_NAMES
@@ -77,10 +76,9 @@ async def test_checks_are_exclusive_and_cancel_cleanly(panel, monkeypatch):
     await started.wait()
     assert (await panel.client.post("/admin/api/checks", json=body)).status_code == 409
     plan = await phone_tests.prepare(panel.h)
-    with pytest.raises(ValueError, match="call_busy"):
-        await panel.h.service.start(
-            plan.plan_id, explicit_confirmation=True, confirmation_text=plan.confirmation_summary
-        )
+    await panel.h.service.start(
+        plan.plan_id, explicit_confirmation=True, confirmation_text=plan.confirmation_summary
+    )
     assert (await panel.client.delete("/admin/api/checks/" + result["id"])).status_code == 204
     assert (await panel.client.get("/admin/api/checks/" + result["id"])).json()[
         "state"
@@ -122,12 +120,30 @@ async def test_check_api_auth_and_restart_marks_abandoned_runs(panel):
     assert (await panel.client.get("/admin/api/checks/missing")).status_code == 404
 
 
-def test_packaged_scenarios_cover_the_exposed_checks():
+def test_packaged_scenarios_cover_the_exposed_checks(tmp_path):
     cases = yaml.safe_load((Path(__file__).parents[1] / "app/check_scenarios.yaml").read_text())[
         "cases"
     ]
     assert set(CASE_NAMES) <= set(c["name"] for c in cases)
     assert all(c["turns"] for c in cases if c["name"] in CASE_NAMES)
+    from pipecat.evals.scenario import EvalScenarioFile
+
+    for case in cases:
+        path = tmp_path / (case["name"] + ".yaml")
+        path.write_text(
+            yaml.safe_dump(
+                {
+                    "name": case["name"],
+                    "user": {"modality": "text"},
+                    "judge": {
+                        "modality": "text",
+                        "eval": {"factory": "app.configuration_checks.check_judge"},
+                    },
+                    "scenarios": [{"name": case["name"], "turns": case["turns"]}],
+                }
+            )
+        )
+        EvalScenarioFile.load(path)
 
 
 async def test_repeated_stop_waits_for_the_same_provider_cleanup(panel, monkeypatch):

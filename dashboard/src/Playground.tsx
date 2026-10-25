@@ -36,6 +36,7 @@ import {
   type Profile,
   type Revision,
   type Voice,
+  type Contact,
 } from "./types";
 
 export default function Playground({
@@ -53,6 +54,14 @@ export default function Playground({
 }) {
   const [brief, setBrief] = useState<Brief>(() => ({
       ...sampleBrief(session.setup, draft?.profileId),
+      direction: draft?.direction || "outbound",
+      ...(draft?.direction === "inbound"
+        ? {
+            objective:
+              "Receive this incoming business call, understand today's need, and agree on a useful next step.",
+            target: { name: "Incoming caller", phone: "withheld" },
+          }
+        : {}),
       language: (draft?.profile?.voice_overrides.conversation_languages ||
         draft?.global?.voice.conversation_languages ||
         session.setup.defaults.conversation_languages)[0],
@@ -67,6 +76,13 @@ export default function Playground({
     [previewLastSession, setPreviewLastSession] = useState(false),
     [settingsSection, setSettingsSection] = useState("voice");
   const [voiceOverrides, setVoiceOverrides] = useState<Partial<Voice>>({});
+  const [contacts, setContacts] = useState<Contact[]>([]),
+    [simulationContact, setSimulationContact] = useState("");
+  useEffect(() => {
+    api<{ contacts: Contact[] }>("/contacts")
+      .then((data) => setContacts(data.contacts))
+      .catch((e) => setError(message(e)));
+  }, []);
   const [profileVoice, setProfileVoice] = useState<Voice>(
     session.setup.defaults,
   );
@@ -148,6 +164,10 @@ export default function Playground({
     const value = {
       ...(draft?.global ? { global: draft.global } : {}),
       ...(draft?.profile ? { profile: draft.profile } : {}),
+      ...(draft?.inbound ? { inbound: draft.inbound } : {}),
+      ...(simulationContact
+        ? { simulation_contact_id: simulationContact }
+        : {}),
       ...(Object.keys(voiceOverrides).length ? { voice: voiceOverrides } : {}),
     };
     return Object.keys(value).length ? value : undefined;
@@ -342,6 +362,52 @@ export default function Playground({
           </div>
         )}
         <fieldset disabled={running || busy || check.checking}>
+          <label>
+            Call direction
+            <select
+              value={brief.direction || "outbound"}
+              onChange={(e) => {
+                const direction = e.target.value as "inbound" | "outbound";
+                clearDraft();
+                setBrief((old) => ({
+                  ...old,
+                  direction,
+                  objective:
+                    direction === "inbound"
+                      ? "Receive this incoming business call, understand today's need, and agree on a useful next step."
+                      : sampleBrief(session.setup).objective,
+                  profile_id:
+                    direction === "inbound"
+                      ? session.setup.reception?.inbound.profile_id || "warm"
+                      : old.profile_id,
+                }));
+              }}
+            >
+              <option value="outbound">Outbound</option>
+              <option value="inbound">Inbound reception</option>
+            </select>
+          </label>
+          <label>
+            Caller context
+            <select
+              value={simulationContact}
+              onChange={(e) => setSimulationContact(e.target.value)}
+            >
+              <option value="">Unknown caller</option>
+              {contacts.map((contact) => (
+                <option key={contact.contact_id} value={contact.contact_id}>
+                  Known:{" "}
+                  {contact.name ||
+                    contact.numbers[0]?.phone ||
+                    "Unknown caller"}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="field-help">
+            Practice can read selected memory. It never changes real contacts,
+            memory, or callback schedules.
+          </p>
           <div className="segmented" role="group" aria-label="Practice mode">
             <button
               type="button"
@@ -588,6 +654,18 @@ export default function Playground({
                   <Send size={17} />
                 </button>
               </form>
+            )}
+            {!!practice?.callback_previews?.length && (
+              <section className="practice-callback-previews">
+                <h3>Practice callback receipts</h3>
+                <p className="muted">Simulation only. No call is scheduled.</p>
+                {practice.callback_previews.map((receipt) => (
+                  <p key={receipt.schedule_id}>
+                    {receipt.destination} · {receipt.state} ·{" "}
+                    {receipt.window_start}
+                  </p>
+                ))}
+              </section>
             )}
             {!!practice?.metrics.length && (
               <footer className="practice-metrics">
