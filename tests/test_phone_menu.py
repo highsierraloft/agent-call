@@ -250,6 +250,7 @@ def test_menu_options_and_human_greetings_are_not_forced_into_hold(text):
 
 async def test_menu_preambles_are_discarded_but_normal_speech_still_streams(monkeypatch):
     from pipecat.frames.frames import (
+        FunctionCallsStartedFrame,
         InterruptionFrame,
         LLMFullResponseEndFrame,
         LLMFullResponseStartFrame,
@@ -272,7 +273,7 @@ async def test_menu_preambles_are_discarded_but_normal_speech_still_streams(monk
     forward.reset_mock()
     await llm.push_frame(LLMTextFrame("The services option is two."))
     forward.assert_not_awaited()
-    await llm._menu_functions_started(None, [])
+    await llm.push_frame(FunctionCallsStartedFrame(function_calls=[]))
     await llm.push_frame(LLMFullResponseEndFrame())
     assert all(not isinstance(c.args[0], LLMTextFrame) for c in forward.call_args_list)
     assert llm.generated_response_text == ""

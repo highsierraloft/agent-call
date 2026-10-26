@@ -11,6 +11,7 @@ from openai.types.chat import ChatCompletionChunk
 from openai.types.completion_usage import CompletionUsage
 from pipecat.frames.frames import (
     Frame,
+    FunctionCallsStartedFrame,
     InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -40,12 +41,6 @@ class OpenRouterVoiceLLMService(OpenRouterLLMService):
         self._menu_tool_started = False
         self._usage_request: ContextVar[int | None] = ContextVar("usage_request", default=None)
         super().__init__(**kwargs)
-        self.add_event_handler("on_function_calls_started", self._menu_functions_started)
-
-    async def _menu_functions_started(self, _service: Any, _calls: Any) -> None:
-        if self._buffer_menu_speech:
-            self._menu_tool_started = True
-            self._menu_text.clear()
 
     async def get_chat_completions(self, context: LLMContext) -> AsyncStream[ChatCompletionChunk]:
         latest = next(
@@ -82,7 +77,12 @@ class OpenRouterVoiceLLMService(OpenRouterLLMService):
         self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
     ) -> None:
         if direction == FrameDirection.DOWNSTREAM:
-            if isinstance(frame, LLMFullResponseStartFrame):
+            if isinstance(frame, FunctionCallsStartedFrame) and self._buffer_menu_speech:
+                # Event handlers run in background tasks. Use the ordered frame so a
+                # fast TTS service cannot receive a preamble before the handler runs.
+                self._menu_tool_started = True
+                self._menu_text.clear()
+            elif isinstance(frame, LLMFullResponseStartFrame):
                 self.generated_response_text = ""
                 self.response_serial += 1
                 self._menu_text.clear()
