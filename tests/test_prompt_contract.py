@@ -104,6 +104,12 @@ async def test_new_plan_freezes_recipient_task_criteria_prompt_and_exact_confirm
     plan = await phone_tests.prepare(h)
     snapshot = await h.service.db.control_plan(plan.plan_id)
     assert snapshot["prompt_contract_version"] == 2
+    assert snapshot["phone_menu_version"] == 1
+    assert "Automated phone menus:" in snapshot["effective_prompt"]
+    assert {t["function"]["name"] for t in snapshot["ai_inputs"]["tools"]} >= {
+        "send_dtmf",
+        "wait_for_phone_menu",
+    }
     assert snapshot["confirmation_summary"] == plan.confirmation_summary
     assert "Intention:" not in plan.confirmation_summary
     assert h.packet.target.background in snapshot["effective_prompt"]

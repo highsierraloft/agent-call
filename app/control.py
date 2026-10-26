@@ -272,6 +272,7 @@ class ControlPlane:
             )
         snapshot = {
             "prompt_contract_version": 2,
+            "phone_menu_version": 1,
             "profile_id": profile_record["entity"].removeprefix("profile:"),
             "profile_revision": profile_record["revision"],
             "configuration_revision": global_record["revision"],
@@ -334,6 +335,8 @@ class ControlPlane:
         self, packet: ContextPacket, overrides: dict[str, Any] | None = None, mode: Mode = "voice"
     ) -> tuple[ContextPacket, dict[str, Any]]:
         configuration = await self.resolve(packet, overrides=overrides)
+        if mode == "text":
+            configuration.pop("phone_menu_version", None)
         configuration["callback_policy"] = (await self.current("callback_policy"))["value"]
         configuration["reception_contract_version"] = 1
         contact_id = (overrides or {}).get("simulation_contact_id")

@@ -85,11 +85,16 @@ async def seed_call(h, call_id="call_control_test", turns=1):
 
 
 async def test_seeded_configuration_preserves_the_existing_prompt(android):
+    from app.phone_menu import MENU_INSTRUCTIONS
+
     h = android
     snapshot = await h.service.control.resolve(h.packet)
-    assert h.service.control.prompt(h.packet, snapshot) == voice_instructions(
+    previous_prompt = voice_instructions(
         h.packet, conversation_languages=h.service.config.conversation_languages
     )
+    assert h.service.control.prompt(h.packet, snapshot) == previous_prompt + MENU_INSTRUCTIONS
+    snapshot.pop("phone_menu_version")
+    assert h.service.control.prompt(h.packet, snapshot) == previous_prompt
     assert set((await h.service.control.setup())["defaults"])
     assert len(await h.service.control.profiles()) == 4
     await h.service.control.initialize()

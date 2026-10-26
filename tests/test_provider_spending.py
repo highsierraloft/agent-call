@@ -132,6 +132,7 @@ async def test_model_adapter_keeps_usage_from_the_original_stream_and_marks_lost
     monkeypatch,
 ):
     from openai.types.completion_usage import CompletionUsage
+    from pipecat.processors.aggregators.llm_context import LLMContext
     from pipecat.services.openrouter.llm import OpenRouterLLMService
 
     from app.openrouter_client import OpenRouterVoiceLLMService
@@ -150,11 +151,11 @@ async def test_model_adapter_keeps_usage_from_the_original_stream_and_marks_lost
         instance = OpenRouterVoiceLLMService(
             api_key="test", base_url="https://example.invalid", http_client=client, usage=ledger
         )
-        assert await instance.get_chat_completions(None) is stream
+        assert await instance.get_chat_completions(LLMContext()) is stream
         instance._token_usage(
             CompletionUsage(prompt_tokens=42, completion_tokens=8, total_tokens=50, cost=0.001)
         )
-        assert await instance.get_chat_completions(None) is stream
+        assert await instance.get_chat_completions(LLMContext()) is stream
     assert ledger.snapshot()["llm_requests"][0]["reported_usd"] == 0.001
     assert ledger.snapshot()["llm_requests"][1] is None
 

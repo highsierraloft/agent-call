@@ -346,6 +346,9 @@ class AndroidCallService:
 
             return await live_callback_tool(self, runtime, name, arguments)
 
+        async def send_dtmf(digits: str) -> None:
+            await self.send_dtmf(runtime.call_id, digits)
+
         await websocket.accept(subprotocol="media")
         runtime.voice = AndroidVoiceSession(
             websocket,
@@ -362,6 +365,7 @@ class AndroidCallService:
                 lambda data: self._spawn(self.db.control_measure(runtime.call_id, data)),
                 callback_tool,
                 silence_timeout,
+                send_dtmf,
             ),
         )
         runtime.voice_task = asyncio.current_task()
@@ -376,6 +380,27 @@ class AndroidCallService:
             else:
                 await self.terminate_call(runtime.call_id, "android_media_disconnected")
             self._spawn(self._save_model_request(runtime))
+
+    async def send_dtmf(self, call_id: str, digits: str) -> None:
+        runtime = self._runtime
+
+        def ready() -> bool:
+            return bool(
+                runtime is not None
+                and self._runtime is runtime
+                and runtime.call_id == call_id
+                and runtime.ending_after is None
+                and runtime.voice
+                and runtime.voice.connected.is_set()
+            )
+
+        if not ready():
+            raise ValueError("The telephone call is no longer active")
+        row = await self.db.get_call(call_id)
+        if not row or row["state"] != CallState.ACTIVE or not ready():
+            raise ValueError("The telephone call is no longer active")
+        # Do not hold the lifecycle lock during network I/O: End Call stays responsive.
+        await self.asterisk.send_dtmf(call_id, digits, guard=ready)
 
     async def _save_model_request(self, runtime: _Call) -> None:
         if runtime.voice is None:

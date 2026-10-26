@@ -53,6 +53,18 @@ def effective_sections(packet: ContextPacket, snapshot: dict[str, Any]) -> list[
             },
         )
     sections.extend(reception_sections(snapshot))
+    if snapshot.get("phone_menu_version"):
+        from app.phone_menu import MENU_INSTRUCTIONS
+
+        sections.append(
+            {
+                "id": "phone_menu",
+                "label": "Automated phone menus",
+                "source": "Runtime rules",
+                "editable": False,
+                "text": MENU_INSTRUCTIONS,
+            }
+        )
     return sections
 
 

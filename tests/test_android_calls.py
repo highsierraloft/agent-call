@@ -45,6 +45,11 @@ class FakeAsterisk:
         self.closed = False
         self.recording_error = False
         self.recordings = []
+        self.keypad = []
+
+    async def send_dtmf(self, call_id, digits, *, guard=None):
+        assert guard is None or guard()
+        self.keypad.append((call_id, digits))
 
     async def start_recording(self, call_id, seconds):
         assert call_id in self.bridged
@@ -106,6 +111,7 @@ class FakeVoice:
         self.ready = asyncio.Event()
         self.done = asyncio.Event()
         self.started = False
+        self.connected = asyncio.Event()
 
     async def run(self):
         self.ready.set()
@@ -113,6 +119,7 @@ class FakeVoice:
 
     async def start_conversation(self):
         self.started = True
+        self.connected.set()
 
     async def stop(self):
         self.done.set()
@@ -220,6 +227,26 @@ async def test_media_precedes_dial_and_only_answer_starts_voice(android):
     assert h.asterisk.bridged == [call.call_id]
     assert h.service._runtime.voice.started
     assert h.asterisk.dials == [(call.call_id, h.packet.target.phone, 90)]
+
+
+async def test_keypad_is_bound_to_current_answered_call_and_stops_with_hangup(android):
+    h = android
+    with pytest.raises(ValueError):
+        await h.service.send_dtmf("call_nonexistent", "2")
+    call = await start(h)
+    await attach(h)
+    with pytest.raises(ValueError):
+        await h.service.send_dtmf(call.call_id, "2")
+    await answer(h, call.call_id)
+    with pytest.raises(ValueError):
+        await h.service.send_dtmf("call_other", "2")
+    await h.service._runtime.voice.callbacks.send_dtmf("2")
+    assert h.asterisk.keypad == [(call.call_id, "2")]
+    assert len(h.asterisk.dials) == 1
+    assert await h.service.terminate_call(call.call_id, "owner_request")
+    with pytest.raises(ValueError):
+        await h.service.send_dtmf(call.call_id, "3")
+    assert len(h.asterisk.keypad) == 1
 
 
 async def test_persists_transcript_only_after_confirmed_carrier_hangup(android):

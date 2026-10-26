@@ -40,7 +40,24 @@ def scheduling_clock(timezone: str, now: datetime | None = None) -> str:
     )
 
 
-def model_tools(mode: Mode = "voice", *, callbacks_enabled: bool = False) -> list[dict[str, Any]]:
+def call_state_notice(*, closing: bool = False, cancelled: bool = False) -> str:
+    state = (
+        "A previous finish_call request was cancelled by recipient speech. Resume this call; it did not end."
+        if cancelled
+        else "Closing is pending farewell playback and the reply window; it has not completed."
+        if closing
+        else "No hangup has completed."
+    )
+    return (
+        "Runtime connection state: this call is still connected. "
+        + state
+        + " Never claim the call has already ended."
+    )
+
+
+def model_tools(
+    mode: Mode = "voice", *, callbacks_enabled: bool = False, phone_menu_enabled: bool = False
+) -> list[dict[str, Any]]:
     function: dict[str, Any] = {
         "name": "finish_call",
         "description": "End the call ONLY when the recipient explicitly asks to finish, the approved task is complete, or the runtime closing notice arrives. Never use this tool for ordinary conversational replies or mentions of later plans. It speaks your farewell, then hangs up after playback and a reply window. Do not say the farewell separately.",
@@ -66,9 +83,12 @@ def model_tools(mode: Mode = "voice", *, callbacks_enabled: bool = False) -> lis
             "do_not_call": {"type": "boolean"},
         }
     from app.callback_voice import callback_tools
+    from app.phone_menu import menu_tools
 
-    return [{"type": "function", "function": function}] + (
-        callback_tools() if callbacks_enabled else []
+    return (
+        [{"type": "function", "function": function}]
+        + (callback_tools() if callbacks_enabled else [])
+        + (menu_tools() if phone_menu_enabled and mode == "voice" else [])
     )
 
 
@@ -122,11 +142,16 @@ def describe_inputs(
     prompt = snapshot["effective_prompt"]
     options = model_options(config, mode)
     messages = initial_messages(prompt, mode)
-    tools = model_tools(mode, callbacks_enabled=bool(snapshot.get("callback_policy")))
+    tools = model_tools(
+        mode,
+        callbacks_enabled=bool(snapshot.get("callback_policy")),
+        phone_menu_enabled=bool(snapshot.get("phone_menu_version")),
+    )
     if mode == "voice":
         messages[0]["content"] += "\n" + time_notice(
             config.call_duration(packet.max_duration_seconds)
         )
+        messages[0]["content"] += "\n" + call_state_notice()
     else:
         messages.append({"role": "user", "content": "<your next practice message>"})
     if snapshot.get("callback_policy"):
@@ -141,6 +166,10 @@ def describe_inputs(
         "initial_request_example": {**options, "messages": messages, "tools": tools},
         "runtime_messages": {
             "connection_event": CONNECTION_EVENT if mode == "voice" else None,
+            "connection_state": call_state_notice() if mode == "voice" else None,
+            "cancelled_closing_state": call_state_notice(cancelled=True)
+            if mode == "voice"
+            else None,
             "scheduling_clock": "Current date, time, UTC offset, and callback timezone. Refreshed each turn."
             if snapshot.get("callback_policy")
             else None,

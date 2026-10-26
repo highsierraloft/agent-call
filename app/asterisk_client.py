@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode, urlsplit, urlunsplit
@@ -193,6 +193,24 @@ class AsteriskClient:
         if response.json().get("state") != "Up":
             raise AsteriskError("The telephone channel has not answered")
         await self.request("POST", "bridges/" + bridge + "/addChannel", body={"channel": cell})
+
+    async def send_dtmf(
+        self, call_id: str, digits: str, *, guard: Callable[[], bool] | None = None
+    ) -> None:
+        from app.phone_menu import validate_digits
+
+        digits = validate_digits(digits)
+        cell, _, _ = self.owned_ids(call_id)
+        response = await self.request("GET", "channels/" + cell)
+        if response.json().get("state") != "Up" or (guard is not None and not guard()):
+            raise ValueError("The owned telephone channel is no longer active")
+        # RFC 4733 reaches the guarded SIP leg, which invokes Android's cellular keypad.
+        # No media-channel tones, new originate, redirects, or retries are involved.
+        await self.request(
+            "POST",
+            "channels/" + cell + "/dtmf",
+            body={"dtmf": digits, "before": 0, "between": 100, "duration": 160, "after": 0},
+        )
 
     async def hangup(self, call_id: str) -> bool:
         cell, media, bridge = self.owned_ids(call_id)

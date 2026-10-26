@@ -56,6 +56,7 @@ from app.call_ai_inputs import (
     CLOSING_RESERVE_SECONDS,
     FAREWELL_REPLY_SECONDS,
     ModelRequestTrace,
+    call_state_notice,
     initial_messages,
     model_options,
     model_tools,
@@ -67,6 +68,7 @@ from app.inworld_client import InworldVoiceTTSService as InworldTTSService
 from app.models import ContextPacket
 from app.openrouter_client import OpenRouterVoiceLLMService
 from app.openrouter_tts import OPENROUTER_API_URL, OpenRouterTTSService
+from app.phone_menu import MENU_LISTEN_SECONDS, PhoneMenu
 from app.provider_usage import UsageLedger
 from app.soniox_client import SonioxVoiceSTTService as SonioxSTTService
 from app.spoken_identity import SpeakerIdentityFilter
@@ -84,6 +86,7 @@ class VoiceCallbacks:
     metrics: Callable[[dict[str, Any]], Any] | None = None
     callback_tool: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None = None
     silence_timeout: Callable[[], None] | None = None
+    send_dtmf: Callable[[str], Awaitable[None]] | None = None
 
 
 class ClosingWindow:
@@ -94,9 +97,11 @@ class ClosingWindow:
         self.last_played_text = ""
         self.played_revision = -1
         self.farewell: str | None = None
+        self.cancelled = False
 
     def user_started(self) -> None:
         self.user_revision += 1
+        self.cancelled = self.cancelled or self.farewell is not None
         self.farewell = None
 
     def played(self, text: str, interrupted: bool) -> None:
@@ -105,6 +110,7 @@ class ClosingWindow:
 
     def request(self, farewell: str) -> None:
         self.farewell = farewell.strip()
+        self.cancelled = False
         self.played_revision = -1
 
     def guard(self) -> Callable[[], bool] | None:
@@ -180,6 +186,9 @@ class AndroidVoiceSession:
         self.ready = asyncio.Event()
         self.connected = asyncio.Event()
         self.closing = ClosingWindow()
+        self._phone_menu = PhoneMenu(callbacks.send_dtmf)
+        self._recipient_message_revision = 0
+        self._menu_listen_until = 0.0
         self._closing_task: asyncio.Task[None] | None = None
         self._wrapup_task: asyncio.Task[None] | None = None
         self._silence_task: asyncio.Task[None] | None = None
@@ -292,6 +301,7 @@ class AndroidVoiceSession:
         options = model_options(config)
         llm = OpenRouterVoiceLLMService(
             usage=self.usage,
+            phone_menu_enabled=bool((configuration or {}).get("phone_menu_version")),
             api_key=api_key,
             http_client=self._llm_http,
             settings=OpenRouterVoiceLLMService.Settings(
@@ -336,7 +346,8 @@ class AndroidVoiceSession:
                 for function in [
                     tool["function"]
                     for tool in model_tools(
-                        callbacks_enabled=bool((configuration or {}).get("callback_policy"))
+                        callbacks_enabled=bool((configuration or {}).get("callback_policy")),
+                        phone_menu_enabled=bool((configuration or {}).get("phone_menu_version")),
                     )
                 ]
             ]
@@ -406,6 +417,12 @@ class AndroidVoiceSession:
         self._runner = WorkerRunner(handle_sigint=False)
 
         llm.register_function("finish_call", self._finish_call, cancel_on_interruption=True)
+        if (configuration or {}).get("phone_menu_version"):
+            # Once dispatched, an interruption must not lose the keypad receipt and retry it.
+            llm.register_function("send_dtmf", self._send_dtmf, cancel_on_interruption=False)
+            llm.register_function(
+                "wait_for_phone_menu", self._wait_for_phone_menu, cancel_on_interruption=True
+            )
         if (configuration or {}).get("callback_policy"):
             for name in ("propose_callback", "confirm_callback", "cancel_callback"):
                 llm.register_function(name, self._callback_tool, cancel_on_interruption=True)
@@ -437,6 +454,7 @@ class AndroidVoiceSession:
 
         async def user_message(_aggregator: Any, message: Any) -> None:
             if message.content:
+                self._recipient_message_revision += 1
                 self._last_activity = time.monotonic()
                 opt_out = (self._sales_call or self._respect_all_opt_outs) and is_direct_opt_out(
                     message.content
@@ -533,7 +551,34 @@ class AndroidVoiceSession:
                     TTSSpeakFrame(farewell.strip(), append_to_context=True)
                 )
         await params.result_callback(
-            {"closing_requested": True}, properties=FunctionCallResultProperties(run_llm=False)
+            {
+                "closing_requested": True,
+                "call_ended": False,
+                "status": "closing_pending",
+                "next_action": "Wait for farewell playback. Recipient speech cancels closing and the conversation must resume.",
+            },
+            properties=FunctionCallResultProperties(run_llm=False),
+        )
+
+    async def _send_dtmf(self, params: FunctionCallParams) -> None:
+        try:
+            if self.closing.farewell is not None:
+                raise ValueError("Closing is pending; do not press keys")
+            result = await self._phone_menu.press(
+                params.tool_call_id,
+                params.arguments.get("digits"),
+                self._recipient_message_revision,
+            )
+        except ValueError as exc:
+            result = {"status": "not_sent", "reason": str(exc)}
+        self._menu_listen_until = time.monotonic() + MENU_LISTEN_SECONDS
+        await params.result_callback(result, properties=FunctionCallResultProperties(run_llm=False))
+
+    async def _wait_for_phone_menu(self, params: FunctionCallParams) -> None:
+        self._menu_listen_until = time.monotonic() + MENU_LISTEN_SECONDS
+        await params.result_callback(
+            {"listening": True, "call_ended": False},
+            properties=FunctionCallResultProperties(run_llm=False),
         )
 
     async def _suppress_destination(self) -> None:
@@ -577,6 +622,9 @@ class AndroidVoiceSession:
     def _add_time_notice(self, *, closing: bool = False) -> None:
         remaining = max(0, int(self._max_call_seconds - (time.monotonic() - self._started_at)))
         content = time_notice(remaining, closing=closing)
+        content += "\n" + call_state_notice(
+            closing=self.closing.farewell is not None, cancelled=self.closing.cancelled
+        )
         if self._callback_timezone:
             content += "\n" + scheduling_clock(self._callback_timezone)
         # The Gemini adapter converts additional system messages to user messages.
@@ -643,6 +691,7 @@ class AndroidVoiceSession:
             await asyncio.sleep(1)
             if (
                 not (self._user_speaking or self._assistant_busy or self._playback_active)
+                and time.monotonic() >= self._menu_listen_until
                 and time.monotonic() - self._last_activity >= self._silence_seconds
             ):
                 assert self.callbacks.silence_timeout is not None

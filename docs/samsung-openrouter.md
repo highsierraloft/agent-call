@@ -36,6 +36,46 @@ The existing OpenAI/Twilio backend remains the default and retains its existing 
 - An uncertain call remains terminating and blocks new calls. It never causes automatic redial.
 - A recipient reply cancels a pending farewell. Closing preserves a three-second reply window.
 
+## Automated phone menus
+
+New voice plans freeze `phone_menu_version: 1` with their prompt and tool snapshot.
+The speaking agent can use `send_dtmf` to press menu digits and enter an extension.
+`wait_for_phone_menu` keeps it silent while a menu continues or an operator connects.
+Both actions keep transcription active. Normal conversation resumes when a person speaks.
+The existing MCP preparation and calling workflow is unchanged; include the desired department
+or known extension in the approved brief.
+
+Asterisk sends RFC 4733 digits to the call's owned cellular channel. The existing guarded gateway
+forwards them to Android's cellular keypad. Incoming calls use their adopted channel ID.
+Neither tool can originate another call, choose another SIM, or redirect a channel.
+The internal inbound-readiness digit `D` remains reserved.
+
+Each keypad request accepts 1–16 characters from `0–9`, `*`, and `#`.
+Requests are serialized, duplicates return the original receipt, and only one sequence is sent per
+recipient turn. A call allows at most 24 keypad actions. The existing call time limit still applies.
+An uncertain result is retained without automatic retry. A successful receipt confirms dispatch,
+not remote menu acceptance. The agent listens for a fresh prompt before another choice.
+
+On explicit keypad or hold prompts in the four supported languages, tool preambles are buffered
+and discarded when a tool runs. This prevents model commentary from being spoken over the menu.
+Explicit hold announcements stay silent even if a model returns text instead of its wait tool.
+Tool choice remains automatic to preserve compatibility with the selected provider route.
+Ordinary human replies continue streaming immediately. A spoken answer to a menu-like phrase is
+released when the response finishes if no tool runs. Interrupted buffered text is discarded.
+
+`finish_call` reports pending closing, not completed hangup. Each new model request receives the
+current connected state. Recipient speech cancels a pending goodbye and updates that state.
+This prevents an interrupted farewell from leaving the model convinced the call has ended.
+
+Existing prepared plans retain their saved prompts and tools. Browser voice practice simulates
+keypad receipts and cannot send tones to a telephone. Text practice has no keypad tools.
+Inspect AI Inputs shows the menu rules and tools for new voice plans.
+
+Regression tests cover owned-channel routing, invalid/reserved digits, duplicates, uncertain
+responses, cancellation, closing, and speech buffering. An isolated Asterisk menu and synthetic
+provider audio can test the path without dialing. Real carrier menu acceptance still requires
+an owner-authorized handset test.
+
 ## Private control panel
 
 The private operator panel manages calls, contacts and memory, callbacks, inbound and outbound

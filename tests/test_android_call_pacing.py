@@ -55,6 +55,7 @@ async def test_timed_wrapup_waits_for_quiet_and_does_not_duplicate_closing(alrea
 
 def test_clock_updates_keep_recipient_last_without_growing_history():
     session = AndroidVoiceSession.__new__(AndroidVoiceSession)
+    session.closing = ClosingWindow()
     session._max_call_seconds = 180
     session._started_at = time.monotonic()
     session._system_prompt = "Follow the approved brief."
@@ -86,6 +87,7 @@ async def test_finish_tool_speaks_once_and_cannot_reuse_old_playback():
     assert speech.append_to_context
     assert session.closing.guard() is None
     assert result.call_args.kwargs["properties"].run_llm is False
+    assert result.call_args.args[0]["call_ended"] is False
     session.closing.user_started()
     assert session.closing.farewell is None
 
