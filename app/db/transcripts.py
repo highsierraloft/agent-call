@@ -81,6 +81,18 @@ class TranscriptsMixin:
         )
         return [TranscriptTurn.model_validate(row) for row in rows]
 
+    async def get_transcript_page(
+        self: DatabaseAccess, call_id: str, *, after_sequence: int, limit: int
+    ) -> list[TranscriptTurn]:
+        if after_sequence < 0 or not 1 <= limit <= 201:
+            raise ValueError("Invalid transcript page bounds")
+        rows = await self.fetch_all(
+            "SELECT * FROM transcripts WHERE call_id=? AND sequence_number>? "
+            "ORDER BY sequence_number LIMIT ?",
+            (call_id, after_sequence, limit),
+        )
+        return [TranscriptTurn.model_validate(row) for row in rows]
+
     async def save_result_with_transcript(
         self: DatabaseAccess,
         call_id: str,

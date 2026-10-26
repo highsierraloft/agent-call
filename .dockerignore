@@ -5,9 +5,17 @@
 *
 
 !Dockerfile
+!Dockerfile.asterisk
+!Dockerfile.android
 !pyproject.toml
 !uv.lock
 !README.md
+!requirements-android.txt
+
+!deploy/
+deploy/**
+!deploy/asterisk/
+!deploy/asterisk/entrypoint.py
 
 !app/
 !app/**
@@ -16,6 +24,13 @@
 scripts/**
 !scripts/agent_call_console.py
 !scripts/container-entrypoint.sh
+
+!Dockerfile.control
+!Dockerfile.control-tests
+!deploy/control/
+!deploy/control/**
+!dashboard/
+!dashboard/**
 
 # Re-exclude secrets, VCS, caches, and runtime data even under allowed paths.
 **/.git
@@ -52,3 +67,12 @@ scripts/**
 **/transcripts/**
 **/data
 **/data/**
+
+**/node_modules
+**/node_modules/**
+**/dist
+**/dist/**
+**/test-results
+**/test-results/**
+**/playwright-report
+**/playwright-report/**

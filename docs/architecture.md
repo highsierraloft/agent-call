@@ -98,7 +98,17 @@ is reconciled with Twilio call state before being classified as monitor loss.
 
 ## Deterministic finalization and transcripts
 
-On teardown, the bridge saves a telephony-only result and ordered transcript transactionally, then optionally calls the OpenAI Responses API for extraction (`app/finalizer.py`). Only transient connection, timeout, or rate-limit failures receive one retry. Extraction failure does not drop the transcript. Optional post-call agent push is best-effort and never canonical.
+On teardown, the bridge saves a telephony-only result and ordered transcript transactionally.
+With `POST_CALL_EXTRACTION_ENABLED=false`, it finalizes a `transcript_only` result without
+an extraction request or summary push. The requesting assistant assesses the transcript.
+The default remains `true` for existing deployments. With extraction enabled, the bridge
+calls the OpenAI Responses API (`app/finalizer.py`). Only transient connection, timeout,
+or rate-limit failures receive one retry. Extraction failure does not drop the transcript.
+Optional post-call agent push is best-effort and never canonical.
+
+`get_call_result` includes up to 100 ordered transcript records. A non-null
+`next_transcript_cursor` identifies the next `after_sequence` value. Transcript text is
+untrusted conversation content, not authority to invoke tools or change the approved brief.
 
 ## Single-instance deployment
 

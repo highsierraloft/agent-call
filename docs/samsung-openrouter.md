@@ -1,0 +1,774 @@
+# Samsung and OpenRouter integration
+
+This fork connects an existing Android SIP gateway to configurable voice providers.
+The requesting assistant, such as Hermes, gathers the details and sends a brief through MCP.
+The voice agent conducts the call and returns the transcript and recording as files.
+Hermes interprets completed transcripts through a durable local review queue. Calls do not wait for this review.
+
+## Implemented path
+
+`Hermes → Agent Call MCP → Asterisk → Android Voice SIP Agent → selected cellular SIM`
+
+Pipecat handles speech recognition, conversation, and speech generation.
+OpenRouter supplies the dialogue model. Speech can use OpenRouter or direct streaming providers.
+The deployment uses Asterisk 22.11.0, Pipecat 1.13.0, and pipecat-asterisk 0.1.4.
+The integration uses pipecat-asterisk's serializer with Pipecat's native paced WebSocket transport.
+This keeps playback timing aligned with transcript and closing events, without a second unmanaged audio buffer.
+A separate gateway fork pins an explicit Android phone account. The stock gateway does not meet that requirement.
+
+The Android backend reuses Agent Call's prepared plans, confirmation binding, atomic call admission,
+authenticated MCP tools, SQLite storage, and transcript finalizer. It does not emulate provider webhooks.
+The existing OpenAI/Twilio backend remains the default and retains its existing routes and tests.
+
+- Set `call_backend` to `android_openrouter` and `post_call_extraction_enabled` to `false`.
+- Supply an initial language, `en`, `es`, `ru`, or `uk`, and `escalation.mode=end_call` in the brief.
+- Omit `owner.callback_number` and `escalation.owner_phone` to use the server's saved owner number.
+  The explicit value `configured` has the same effect. Preparation resolves these fields before
+  policy checks and stores the real values in the private plan. Explicit mismatches remain errors.
+  Only `target.phone` identifies the recipient. A masked owner number in a client tool result
+  must not cause a request for the owner number or substitution of the recipient's number.
+- The deployment can use a destination allowlist or explicitly allow any valid international destination.
+- Calls default to 30 minutes and accept a per-call duration up to the configured safety ceiling, at most two hours.
+- The backend checks fresh phone supervision, the selected SIM policy, and SIP registration before dialing.
+- It opens and validates the owned audio channel before originating the cellular leg.
+- It starts the conversation only after the cellular channel reports an answer.
+- Cancellation and deadlines end the owned channels. A new phone-idle observation must confirm teardown.
+- An uncertain call remains terminating and blocks new calls. It never causes automatic redial.
+- A recipient reply cancels a pending farewell. Closing preserves a three-second reply window.
+
+## Automated phone menus
+
+New voice plans freeze `phone_menu_version: 1` with their prompt and tool snapshot.
+The speaking agent can use `send_dtmf` to press menu digits and enter an extension.
+`wait_for_phone_menu` keeps it silent while a menu continues or an operator connects.
+Both actions keep transcription active. Normal conversation resumes when a person speaks.
+The existing MCP preparation and calling workflow is unchanged; include the desired department
+or known extension in the approved brief.
+
+Asterisk sends RFC 4733 digits to the call's owned cellular channel. The existing guarded gateway
+forwards them to Android's cellular keypad. Incoming calls use their adopted channel ID.
+Neither tool can originate another call, choose another SIM, or redirect a channel.
+The internal inbound-readiness digit `D` remains reserved.
+
+Each keypad request accepts 1–16 characters from `0–9`, `*`, and `#`.
+Requests are serialized, duplicates return the original receipt, and only one sequence is sent per
+recipient turn. A call allows at most 24 keypad actions. The existing call time limit still applies.
+An uncertain result is retained without automatic retry. A successful receipt confirms dispatch,
+not remote menu acceptance. The agent listens for a fresh prompt before another choice.
+
+On explicit keypad or hold prompts in the four supported languages, tool preambles are buffered
+and discarded when a tool runs. This prevents model commentary from being spoken over the menu.
+Explicit hold announcements stay silent even if a model returns text instead of its wait tool.
+Tool choice remains automatic to preserve compatibility with the selected provider route.
+Ordinary human replies continue streaming immediately. A spoken answer to a menu-like phrase is
+released when the response finishes if no tool runs. Interrupted buffered text is discarded.
+
+`finish_call` reports pending closing, not completed hangup. Each new model request receives the
+current connected state. Recipient speech cancels a pending goodbye and updates that state.
+This prevents an interrupted farewell from leaving the model convinced the call has ended.
+
+Existing prepared plans retain their saved prompts and tools. Browser voice practice simulates
+keypad receipts and cannot send tones to a telephone. Text practice has no keypad tools.
+Inspect AI Inputs shows the menu rules and tools for new voice plans.
+
+Regression tests cover owned-channel routing, invalid/reserved digits, duplicates, uncertain
+responses, cancellation, closing, and speech buffering. An isolated Asterisk menu and synthetic
+provider audio can test the path without dialing. Real carrier menu acceptance still requires
+an owner-authorized handset test.
+
+## Private control panel
+
+The private operator panel manages calls, contacts and memory, callbacks, inbound and outbound
+settings, versioned personalities, browser practice, and the calling guide consumed by Hermes.
+Its React interface is built with `dashboard/package-lock.json` and served by `Dockerfile.control`.
+Administration APIs remain inside the existing FastAPI worker.
+
+The grouped sidebar separates Activity (Calls, Contacts, Callbacks, Costs), Agent (Inbound,
+Outbound, Personalities), and Workspace (Playground, Hermes, Settings). Collapse it to an icon
+rail or expand it for labels. The browser remembers this choice across visits and shares it
+between tabs. On phones, expansion overlays the workspace; Escape or selecting a destination
+closes it. End Call remains available across views, including inside expanded phone navigation.
+Contacts separates Conversations, Memory, and Details. Contact and memory drafts survive tab
+changes; leaving the contact asks before discarding unsaved changes, including browser history
+navigation. Reloading or closing the page invokes the browser's unsaved-change warning.
+The compact contact list scrolls separately and shows each name and primary number. Conversation
+rows open the original call, transcript, and recording. Their action menu contains Hermes review.
+Missing summaries add no placeholder paragraph; actual summaries and review status remain visible.
+Dates use the workspace timezone. Empty views use a single padded state label.
+Callbacks separates Scheduled from Follow-ups.
+Contact search and creation controls share a height and baseline. Forms own their outer padding;
+the shared field-group style does not reset it. Costs and callback views use one bounded content
+column, with filters and actions in a compact toolbar. Costs keeps unknown usage explicit without
+repeating scope disclaimers or a second call-list heading.
+Narrow editors place Save below the title. Picker buttons match their field height, and the temperature
+switch has a separate header row so its touch area cannot overlap the input.
+
+Settings separates Business, Voice & Models, and Memory; Outbound separates Instructions from
+Automatic Callbacks. Inbound intake limits and additional callback rules use labelled disclosures.
+Revision forms keep Save Changes visible and place the full-text editor, history, and reload in More.
+Personalities separates Instructions, Voice & Model, and Call Settings. The selected section preserves
+unsaved edits. Save and Try in Playground stay visible; More contains the full-text editor, history,
+and duplication. Response controls, Speech Expression, and turn timing use labelled disclosures with
+current-value summaries. On narrow screens, a profile picker replaces the library list.
+
+Playground keeps Start/End Practice above optional settings and fixes these controls to the bottom
+on narrow screens. Its Inspect menu keeps current inputs and the last session separate. Calls keeps
+search visible, groups filters, and puts settings and diagnostics in Details. Hermes keeps the calling
+guide separate from MCP tools and connection help. All existing settings, data, and actions remain
+available. The interface preserves its Apple-style hierarchy and system font stack, with neutral
+surfaces, blue accents, restrained dividers, and light or dark appearance from the device setting.
+Semantic HTML controls, labelled fields, visible keyboard focus, and progressive disclosure keep
+routine actions clear while retaining detailed settings and inspection tools.
+Short transitions show sidebar and pane changes. The device's reduced-motion setting disables them.
+Controls retain touch targets on phones; content adapts to the remaining workspace width and enlarged text.
+
+Saving creates an immutable revision and applies it to future preparations. Existing plans and
+active calls retain their stored settings snapshots. Contact and memory saves also leave existing
+call snapshots unchanged. Restoration creates another revision.
+Concurrent saves use the expected revision and return a conflict instead of overwriting another edit.
+Configuration fields pause editing while a save is in progress, so its response cannot overwrite a later edit.
+Changing the configuration entity mounts a separate editor. Outbound instructions cannot be rendered
+as callback-policy fields while the new record loads.
+Built-in profile IDs remain available for older clients; custom profiles can be archived.
+
+`ContextPacket.profile_id` is optional. `get_calling_setup` supplies the current calling guide,
+active profile IDs, languages, and defaults. Install a calling-specific Hermes bootstrap that fetches
+this tool before each preparation. The dashboard does not need Hermes's home directory or credentials.
+Call results include configuration revision references. Full snapshots are available only in the
+authenticated control panel. Older calls without snapshots remain explicitly unrecorded.
+
+**Inspect AI Inputs** separates the call model's starting system prompt into ordered sections,
+with the source of each section and whether it is editable. It also shows model parameters,
+speech settings, the `finish_call` tool definition, connection and timer messages, and an initial
+request example. Shared voice defaults, direction-specific instructions, the selected personality, recipient context, and the approved brief feed the call model.
+The Hermes calling guide is separate: Hermes reads it to prepare and monitor calls; it is not copied
+into the call model's system prompt. The sidebar labels this area **Hermes**.
+
+The **Latest Request** view reads the actual serialized outgoing OpenRouter request body,
+including messages, tools, and model options. A request hook retains the immutable bytes in memory;
+it performs no database write or JSON parsing in the audio path. Only the latest body is retained,
+up to 4 MiB. Oversized bodies are marked omitted. Request capture precedes sending and does not
+prove provider receipt or a successful response. Authentication headers and credentials are never captured.
+Provider-internal instructions and unspecified defaults are outside this application's visibility.
+
+New plans freeze the configured input description. A completed telephone session stores its last
+captured request in `call_model_requests`; practice inspection stays ephemeral. Inspection endpoints
+use the same owner-only authentication as other administration APIs. Capture failure or process loss
+must remain visible as missing data. Earlier calls retain any recorded starting prompt, but missing
+tool/request snapshots are never reconstructed from current code. Input descriptions can be downloaded as JSON.
+
+Set `android.dashboard_config_file` to a private, read-only JSON mount with `bridge_token`,
+`owner_login`, `public_origin`, `trusted_proxy_ips`, `timezone`, and `hermes_url`.
+The bridge token is a separate random credential of at least 32 characters. The owner login is the
+personal Tailscale identity allowed to open the panel. Both URLs use private Tailscale HTTPS.
+Use exact Docker host gateway addresses for `trusted_proxy_ips`; do not trust entire container subnets.
+
+The Caddy container accepts application traffic only from those host proxies and the configured
+Tailscale identity. It adds the bridge credential to worker requests. This prevents another container
+from impersonating the owner by sending a forged identity header directly to Caddy. The worker also
+checks the bridge credential, identity, origin, and a signed CSRF cookie for mutations.
+Neither provider credentials nor the MCP bearer token are sent to browser JavaScript.
+Publish only the proxy's loopback port and add a dedicated Tailscale Serve HTTPS route.
+Preserve existing Serve routes and keep the worker's MCP and telephone-media endpoints unpublished.
+
+Voice practice uses Pipecat's JavaScript WebSocket transport and the same speech pipeline.
+Its `WavMediaManager` runs locally without Daily CDN downloads. Browser input uses 16 kHz;
+Pipecat resamples output to the manager's 24 kHz player. Telephone audio remains 8 kHz.
+It cannot dial or change real recipient opt-outs. Phone calls and practice share one voice slot.
+Browser disconnect, cancellation, and provider failure release that slot after cleanup.
+Practice transcripts are temporary and separate from telephone records. Unsaved edits can be tested
+without applying them. Browser timings do not establish cellular carrier or handset latency.
+
+Calls support transcript search, filters, pagination, notes, quality tags, and authenticated files.
+Notes never alter the original transcript. MP3 responses support byte ranges; Markdown downloads
+have an explicit `.md` filename. Neither file type has automatic retention cleanup.
+Personalities and Playground use native dropdowns for OpenRouter models, named Inworld voices,
+Inworld TTS-2 or TTS-2 Flash, and compatible Soniox real-time models. Search voices by name,
+language, or description. Soniox aliases are labelled with their underlying engine; async models
+are excluded. The current provider accounts remain in use. No new credentials are required.
+
+
+**Play Sample** loads an unbilled Inworld provider sample only after a click. The authenticated
+`GET /admin/api/voice-preview?voice=...&model=...` keeps credentials on the server. Requests are
+serialized; the memory cache expires after 24 hours and holds at most 32 MiB. Rate limits and
+unavailable voices have explicit errors. There is no fallback to paid synthesis. Only one sample
+plays at a time, and starting microphone practice stops it. Provider-selected text does not
+represent the task, personality, or Speech Expression. See the [preview API](https://docs.inworld.ai/api-reference/voiceAPI/voiceservice/get-voice-preview).
+
+The server fetches provider catalogs and caches each list independently for one hour. Model choices
+require tools and tool-choice support; temperature support is not required. This includes GPT-6 Luna,
+Claude Haiku 5.5, and supported Gemini alternatives. Listed prices come from OpenRouter's catalog;
+they are per million tokens and can vary by provider. Catalog failures retain prior choices and the
+current selection. Reviewed metadata provides an outage fallback for the default and named models.
+An unknown model without usable catalog metadata is rejected before starting a conversation.
+Catalog sources: [OpenRouter models](https://openrouter.ai/api/v1/models),
+[Soniox model metadata](https://soniox.com/docs/api-reference/stt/get_models), and
+[Inworld TTS models](https://docs.inworld.ai/tts/tts-models).
+
+Changing models clears provider pins and keeps reasoning Off. Models that require reasoning show
+an explicit warning; saving or practice fails until the owner chooses a supported effort. Provider
+default is a separate, explicit choice and can enable thinking. Temperature can be disabled; unsupported
+temperature and reasoning fields are omitted from the actual requests. The maximum output-token
+budget is editable from 64 to 16384, including any reasoning tokens; the unchanged default is 512.
+Speech Expression offers Consistent (`STABLE`), Balanced (`BALANCED`), and Expressive (`CREATIVE`).
+It changes audio variation and emotional range. Flash ignores it, so the control is disabled while its saved value is retained.
+
+Playground's **Voice and model choices** apply temporary session overrides without saving a revision.
+They take precedence over the selected personality and any unsaved editor draft. Inspect AI Inputs
+and both voice/text practice use these same overrides. After practice, Inspect Last Session retains
+access to the captured request; Inspect AI Inputs previews the current selection. Reset Practice Choices restores the selected
+personality's values. Starting a session freezes its settings and disables editing until it ends.
+Save in Personalities to apply a choice to future calls. Existing prepared and active calls retain their
+resolved model capabilities, parameters, prompt, and voice snapshot; catalog refreshes cannot rewrite them.
+Catalog I/O and validation happen before the conversation, never inside the audio loop.
+
+The selector release also passed live-provider browser practice with Haiku 5.5, Ashley,
+TTS-2 Flash, and Soniox's v4 alias, followed by GPT-6 Luna text practice. Captured outgoing
+requests had reasoning Off and no temperature. This used synthetic microphone input,
+kept saved revisions unchanged, and placed no telephone call. It is not handset latency evidence.
+
+Run `npm ci`, `npm run build`, and `npm test` from `dashboard/` for frontend verification.
+Browser tests use synthetic records and intercepted APIs; they cannot place a telephone call.
+`Dockerfile.control-tests` provides an isolated Linux WebKit environment when the local runtime
+is unavailable. Run it with no external network after building its dependencies.
+Provider-backed browser acceptance uses synthetic microphone audio, not an unattended real microphone.
+The control-panel gate passed 974 backend tests with two skips and 89.07% coverage.
+Sixty-eight browser checks cover Chromium, dark appearance, desktop WebKit, and phone WebKit.
+They include the local audio handshake, microphone release, permission denial, and stable pagination.
+The production image also removes Caddy's file capability so it runs with all Linux capabilities dropped.
+A provider-backed browser replay completed four languages and interruptions. Four measured reply starts
+were 1.195–1.443 seconds after user silence at the server; the first greeting took 2.452 seconds.
+These are small samples, not latency percentiles. The earlier telephone-transport replay measured
+1.082–1.262 seconds. Different transports, input samples, and provider timing prevent a direct regression claim.
+Explicit stop and tab closure both released practice capacity. Native Hermes model discovery,
+authenticated MP3 seeking, Markdown delivery, and the live voice/model catalogs passed without dialing.
+The earlier input-inspection update preserved its prior system prompt byte-for-byte; contract v2 intentionally changes new calls only. A provider-backed browser
+check captured the outgoing Gemini 3.1 Flash-Lite request, its runtime timer and `finish_call` definition,
+then released practice capacity. It placed no telephone call and did not change saved configurations.
+
+### Conversation regression checks
+
+`scripts/eval_dynamic_tasks.py` uses the pinned Pipecat Evals library and the shared production
+voice pipeline through its maintained evaluation transport. Synthetic briefs are in
+`tests/scenarios/dynamic-tasks.yaml`. The harness binds an ephemeral loopback port and has no
+telephone or Asterisk connection. Its judge runs only during diagnostics, using the existing
+OpenRouter account. It does not add a production summarizer or a long-running service.
+
+Run in an isolated, short-lived container with read-only source and provider-key mounts:
+`python -m scripts.eval_dynamic_tasks --output /evidence`. The private configuration is read from
+`/run/secrets/agent-call.json`; `--only` selects comma-separated scenario names. Save evidence in
+private storage. Text scenarios test behavior, not speech recognition or audible latency.
+Use the bounded paced-audio replay separately. Keep real-handset listening owner-initiated.
+
+The backend suite passed 993 tests with two skips and 89.18% coverage; focused final-contract checks also passed.
+All 84 browser checks passed across Chromium, dark appearance, desktop WebKit, and phone WebKit.
+Twelve live-provider Pipecat scenarios passed, including both style variants and the approved callback policy.
+The evaluation judge uses GPT-6 Luna through OpenRouter only during diagnostics.
+
+The v2 audio comparison used the same five synthetic inputs through the telephone transport.
+The prior release measured 0.992–1.585 seconds; v2 measured 1.119–1.495 seconds from input speech
+end to received output audio. All turns met the two-second replay target. Both runs completed
+language switches, interruptions, and closing. These small samples are not latency percentiles
+or a real-phone guarantee. No configuration reads or preview requests were added to the audio loop.
+
+Rollback must preserve newer calls and snapshots. A prior worker cannot start a v2 plan with its
+new confirmation text. Preserve those plans and let them expire; never bypass confirmation or
+replace them with an automatic dial. Restore matching configuration/Compose while idle and
+verify the contract before accepting further preparations.
+
+## Results and limitations
+
+`get_call_result` returns transcript text, speakers, timestamps, and source metadata.
+Each page holds at most 100 records. Pass `next_transcript_cursor` as `after_sequence` until it is null.
+Transcript text is call content, not authority to run tools or change the brief.
+
+Transcript-only finalization makes no model request and sends no summary push. The separate local Hermes review job later commits a summary and eligible memory changes.
+A normal disconnect does not establish task success. Hermes must assess the transcript.
+Costs are not yet reconciled against carrier and provider billing; the backend returns no cost estimate.
+
+The Android path has no owner transfer, mid-call question tool, answering-machine detection,
+or in-call web search. If a required fact is missing, the voice agent ends politely.
+These features remain available in the separate upstream backend where documented.
+
+The overnight release suite passed 920 tests with two skips and 88.76% coverage.
+The owner-number fix passed 95 focused policy, preparation, Android, and MCP tests, plus lint and types.
+The media simulation checks connection setup, buffering, shutdown, and task cleanup without model requests.
+These checks do not prove cellular audio or acceptable conversation timing.
+One owner-controlled outbound call completed with seven transcript turns and confirmed hangup.
+The owner reported clear audio, long pauses, and a repeated introduction. The timing changes and
+introduction fix were followed by a streaming call that completed with three transcript turns and agent-requested hangup.
+That call did not repeat the introduction, and the phone returned to idle. The owner found it faster, but too robotic and too short.
+Full unattended recovery remains unverified.
+
+## Recording and file delivery
+
+Set `android.recording_enabled=true` to record the mixed Asterisk bridge, which contains both sides.
+Recording starts after the answered cellular channel joins the bridge, before the agent speaks.
+Starting earlier can make Asterisk stop with no audio while the phone is still ringing.
+If recording setup fails, the answered call ends without starting the conversation.
+Hangup remains bounded even when stopping the recording fails. Recording does not add a speech-provider request.
+
+The worker requires FFmpeg and ffprobe, included in `Dockerfile.android`.
+Mount private, writable persistent storage at `/var/spool/asterisk` in the Asterisk container,
+owned by UID/GID `1000:1000`. Keep the worker's `/data` persistent as well.
+Completed files are stored under `/data/call-artifacts/<call_id>/` with private file permissions.
+The worker converts the mixed WAV to a mono, 16 kHz, 32 kbit/s MP3 after the call.
+It verifies a playable audio stream before returning the MP3. It rejects recordings that ended substantially before the capture stop time.
+Downloads stream to disk with a 128 MiB bound. Source recordings are deleted only after successful conversion and validation.
+Failed conversions retain the source for retry. Invalid existing MP3s are preserved separately and excluded from attachments.
+No retention schedule is configured.
+
+Without an export directory, the first result page returns native `audio/mpeg` audio and an embedded `text/markdown` document.
+The document contains every stored transcript turn, even when the JSON response needs more pages.
+Later pages return transcript data and file metadata without repeating the attachments.
+`artifacts.audio_status` distinguishes available, pending, missing, unanswered, and unrecorded audio.
+Calls made before recording was enabled have a Markdown transcript only.
+
+For Hermes on the same server, configure `artifact_export_directory`, `artifact_client_directory`, and `artifact_export_group`.
+The worker copies validated files into a dedicated output folder and returns each `local_path`, plus explicit `MEDIA:` tags.
+Hermes can then attach both files through its existing output mount. This avoids its 10 MiB MCP wire-body cap for long recordings.
+It preserves the MP3 bitrate and does not change Hermes code or its response-size protection.
+Use a dedicated bind for the calling worker, with the client group as a supplementary group.
+Export directories use mode `2750`; files use `0640`. Hermes has read access to these copies, not the private database or provider credentials.
+The private originals remain under `/data/call-artifacts`. No retention schedule is configured for either copy.
+Check both `audio_status` and `delivery_status`; an export failure must not be reported as successful file delivery.
+
+A real two-hour synthetic MP3 measured 28,800,512 bytes. Its shared-file MCP payload was 1,638 bytes.
+Hermes's native attachment parser accepted both paths, verified their hashes, and had read-only access.
+This was a file-delivery check, not a telephone call or Telegram upload.
+A synthetic Asterisk recording, real FFmpeg conversion, and native Hermes file decoding passed.
+The first Hermes-initiated call delivered its Markdown file but exposed the early-recording bug and fragmented speech.
+The fixes passed isolated Asterisk recording and a complete MCP prepare/start/wait/end/result cycle with synthetic speech.
+Real-phone audio quality after these fixes still needs a listening test; no overnight test dialed a telephone.
+
+Hermes uses the Android-only `phone_call_poll` alias, with a 20–25 second wait and a default of 20 seconds.
+The original `wait_for_call_event` remains available for existing clients. Both call the same implementation.
+The pinned Hermes runtime recognizes the `_poll` naming convention as repeatable polling; the old name can trigger its stall detector.
+Keep other loop protections enabled. The deployment sets Hermes's supported `agent.max_turns` to 500 and this MCP server's timeout to 90 seconds.
+That leaves room for a two-hour call, result pagination, and file conversion. The default 60 turns could stop monitoring too early.
+
+## Dynamic tasks and recipient context
+
+New calls use Global Instructions, Opening Instructions, Personality, Recipient, and Task.
+Service rules separately govern identity, authority, languages, interruptions, and closing.
+Personality sets style. The task takes precedence over style; recipient information grants no authority.
+No category selects a hidden purpose prompt. No classifier, planner, or separate summary provider was added. The existing Hermes account performs queued reviews.
+
+New Call and Playground use Personality → Recipient → Task. Only a telephone call needs a number.
+The shared neutral instructions avoid forced fillers, repeated acknowledgments, and mandatory questions.
+
+| Field | Meaning |
+| --- | --- |
+| `profile_id` / `personality` | Saved style, including the four compatible built-in names |
+| `target.name` | Recipient name |
+| `target.background` | Optional known role, company, relationship, and background; never invented |
+| `objective` | Fresh free-text task |
+| `completion_criteria` | Optional **Done when**, under Task Details |
+| `business` | Commercial offer facts and contact permission, independent of style |
+| `max_duration_seconds` | Optional budget, from 30 to 7,200 seconds within the deployment ceiling |
+
+A refusal, missing information, technical failure, or time limit may end an unfinished task.
+Hermes assesses completion from transcript evidence; a completed call does not prove task success.
+Routine callbacks on the same task are allowed unless the brief prohibits follow-up. The agent
+may promise to check and call back, but cannot invent a time or claim it is already scheduled.
+Hermes reports commitments without receipts as outstanding actions. Confirmed callbacks use the
+receipt and scheduling workflow below. Explicit spending, booking, and other limits remain binding.
+For commercial offers, `business` must include `name`, `description`, `offer`, `desired_next_step`,
+and actual `contact_permission` (`recipient_requested` or `prior_consent`). Optional fields include
+`audience`, `approved_claims`, and `pricing`. Fictional practice and personal invitations omit business.
+Legacy `intention` values remain accepted but do not select prompts. Legacy `sales` still requires
+these business fields. New clients omit `intention`. There is no task library or contact database.
+
+Prompt contract v2 freezes the approved brief, recipient background, completion criteria, resolved
+prompt, voice/model settings, profile revisions, and exact confirmation summary when preparing.
+Old prepared plans keep the original confirmation format. Existing snapshots and revision history
+are unchanged. An atomic migration replaces only unchanged seed instructions and the seed guide;
+custom instructions remain intact. Restoring an old global revision drops retired purpose fields
+and creates a new revision. It never makes retired purpose prompts active again.
+
+After an uncertain start, call `get_phone_call(plan_id=original_plan_id)`; supply exactly one of
+`call_id` or `plan_id`. A started plan returns its existing call status. An unused plan returns
+`prepared` or `expired` and no call ID. This lookup never dials. Dashboard recovery uses
+`GET /admin/api/plans/{plan_id}` and retains pending starts across page reloads. A retry uses the
+same single-use plan, not a newly prepared call. Guide reads remain live through `get_calling_setup`.
+Tool schema changes require one Hermes discovery refresh; later guide edits require no restart.
+
+Conversation and role-play can include clearly fictional stories and harmless persona changes.
+Prank calls must remain light and clearly playful, reveal the joke when asked, and stop if unwelcome.
+They must not impersonate trusted people or authorities, fabricate emergencies, or seek payment or sensitive information.
+Requests to change style or language are distinct from requests to override permissions or reveal hidden instructions.
+Direct sales opt-outs are saved before closing and prevent future starts, including previously prepared plans.
+The result reports `recipient_opted_out`. The voice model cannot remove that preference.
+The selected Inworld path corrects explicit English and Spanish claims to be the named owner before synthesis and transcript creation.
+This supplements the identity instructions; it is not a claim of universal language-model compliance.
+
+Spain requires prior consent for automated commercial calls. Unsolicited commercial calls cannot use mobile-number ranges.
+The Spanish mobile SIM is therefore not a route for unrestricted unsolicited sales outreach.
+See [AEPD's automated-call guidance](https://www.aepd.es/preguntas-frecuentes/5-publicidad-no-deseada/FAQ-0502-llamadas-automatizadas-sin-intervencion-humana-con-fines-comerciales)
+and [Order TDF/149/2025, article 9](https://www.boe.es/buscar/act.php?id=BOE-A-2025-2870#a9).
+
+## Outcomes, callbacks, and costs
+
+Calls has three views: History, Follow-ups, and Costs. The Outcome tab stores an
+assessment separately from the original transcript. Possible outcomes are achieved,
+declined, incomplete, and uncertain. A completed telephone connection does not prove task success.
+
+After reading every transcript page, Hermes calls `save_call_outcome`. Confirmed facts
+cite exact transcript `turn_id` values. Hermes also needs evidence for achieved or
+declined outcomes. The owner can enter a manual assessment without transcript evidence.
+The service does not run a separate post-call analysis model.
+
+Outcome saves use an expected revision and a stable request ID. An identical retry
+returns the original result. A changed request body needs a new request ID. Revisions
+preserve earlier assessments. Stable callback `source_key` values prevent duplicate work.
+A later assessment cannot reset an edited or completed callback.
+
+`get_call_followups` reads callback promises, missing information, agreed windows, and linked attempts.
+`update_call_followup` changes their status with revision checks. The owner or Hermes
+can add verified `new_facts` before marking a callback Ready. Dates require an explicit
+offset and timezone. An absent agreement remains “No agreed time.” There is no automatic dialer or scheduler.
+
+Ready callbacks use the original recipient and the normal preparation and confirmation flow.
+`prepare_phone_call` accepts optional `followup_id`. The plan retains this link and its frozen brief.
+Cancellation or renewed missing information blocks an older prepared attempt.
+Recipient opt-outs still apply. For an uncertain start, recovery uses the original plan ID.
+Hermes can complete a callback only after a linked terminal call has an achieved or declined assessment.
+The owner can close work resolved outside a telephone call with an explanatory note.
+
+Costs uses USD and groups telephone calls by their start month in the owner's timezone.
+Each new plan freezes pricing assumptions. Changes to those assumptions affect future preparations only.
+OpenRouter cost comes from provider-reported response usage, with frozen catalog rates as a fallback.
+Soniox uses connected-session duration and an approximate hourly equivalent.
+Inworld uses submitted characters, including text interrupted before playback.
+Interrupted model responses without usage produce partial totals. Historical missing usage remains unknown.
+
+The initial assumptions use [Soniox pricing](https://soniox.com/pricing) and
+[Inworld pricing](https://inworld.ai/pricing), checked on 25 October 2026.
+Soniox's token billing is approximately $0.12 per hour. Inworld on-demand rates are
+$25 per million characters for TTS-2 and $15 for TTS-2 Flash. The owner can edit these
+assumptions for their plan. Carrier charges, taxes, subscriptions, credits, practice,
+and configuration checks are outside telephone totals. These estimates are not invoices.
+Usage counters stay in memory during speech. SQLite stores usage and the estimate after the voice session ends.
+
+## Playground configuration check
+
+**Check Configuration** runs six synthetic text scenarios through the existing voice pipeline
+and Pipecat Evals. It uses the selected profile and temporary editor choices.
+Scenarios cover corrected facts, missing facts, unauthorized commitments, refusal,
+language switching, and premature endings. A single enabled language skips the language-switching scenario.
+
+Results retain the tested settings, fingerprint, example responses, and failure reasons.
+They remain separate from telephone records. The judge uses GPT-6 Luna through the
+existing OpenRouter account only for these checks. Provider usage applies, including
+speech connections opened by the pipeline. This action does not measure audible voice quality or carrier delay.
+
+A check has a five-minute limit and shares capacity with calls and practice.
+**Stop Check** releases provider connections before capacity becomes available.
+A service restart marks unfinished checks Interrupted. The deployment lease rejects active checks.
+The local evaluation listener uses an ephemeral loopback port and a random capability path.
+It has no dialing interface. Phone listening remains a separate acceptance step.
+
+The database migration adds tables and preserves earlier records. On rollback, keep calls
+disabled until new callback plans expire or an operator reconciles them. Earlier workers
+do not enforce callback status. Never overwrite new records with the pre-release database.
+
+The workflow release passed 1,020 backend tests with two skips and 88.39% coverage.
+All 104 browser checks passed across Chromium, dark appearance, desktop WebKit, and phone WebKit.
+Six real-provider configuration scenarios passed in an isolated database copy.
+The trial preserved telephone records and snapshots, then released provider sessions.
+The five-turn audio replay measured 1.209–1.700 seconds, within the existing two-second target.
+The earlier v2 replay measured 1.119–1.495 seconds. These small samples do not establish latency percentiles or handset quality.
+Usage capture included interrupted model requests without final usage. Their costs remain explicitly partial.
+No real telephone call was placed.
+
+## Inbound reception and contact memory
+
+Settings owns business identity, approved information, shared voice defaults, and memory-review instructions.
+Inbound owns reception instructions, greeting, intake questions, personality, and limits.
+Outbound owns the existing conversation/opening text and automatic callback policy.
+Personalities remain reusable styles with optional voice/model overrides.
+All saves append revisions. Prepared and active calls retain their snapshots.
+
+Inbound starts disabled. Supply the real business name, description, and approved facts before testing.
+Do not substitute an example business. Open the five-minute handset-check window from Inbound,
+then complete owner-controlled selected-SIM tests. Record caller identity, greeting timing, recording,
+native fallback, and an answered scheduled callback. The acceptance action checks saved call evidence.
+It does not enable answering. Enable answering separately after acceptance passes.
+Turning answering off does not terminate an answered call.
+
+The guarded gateway accepts only its pinned subscription. Contract 2 reports `incoming=selected-only`.
+It sends an authenticated SIP leg with caller presentation and releases unanswered failures to the native dialer.
+Asterisk stores the actual incoming channel ID; this path never originates an outbound call.
+The worker reserves capacity, persists the call, freezes settings/memory, and prewarms providers before answer.
+The gateway sends DTMF D after both media ports connect. Greeting and recording wait for this readiness marker.
+A provider or silence failure plays a packaged local WAV when audio remains available, then ends the call.
+These files cover English, Spanish, Russian, and Ukrainian and require no live synthesis.
+
+Existing phone conversations take priority over other work. Ringing inbound calls preempt unstarted
+scheduled callbacks. Practice and configuration checks must finish cancellation before phone admission.
+Busy or unavailable reception leaves normal handset/carrier handling in control.
+
+Contacts share number associations across both call directions. Shared, withheld, and unavailable numbers
+remain distinct. Caller ID is recognition, not authentication. Alternate callback numbers do not reassign identity.
+Contacts show call timelines, outcomes, summaries, recordings, memory, and callback receipts.
+Owner notes remain private and never enter voice context or the review tools.
+Owner edits are revision checked. Deleted facts retain source tombstones, so old reviews cannot revive them.
+Relinking a completed call changes its history association without merging contacts or changing number ownership.
+Each new call stores a bounded memory snapshot. Earlier calls retain their original snapshots.
+Historical calls are linked as history without invented summaries. Review with Hermes explicitly queues them.
+
+New finished calls enter a durable review queue. `claim_call_review` leases one job for five minutes;
+`read_call_review` renews the lease and requires every transcript page. `commit_call_review` atomically saves
+summary, outcome, eligible memory facts, unscheduled promises, and completion. Stable request IDs recover
+lost save responses. Owner corrections and contact changes cause a conflict, not silent overwrite.
+Expired leases recover. Conversations use the last committed memory while analysis is pending.
+
+Use Hermes v0.22.2 native cron with a normal `script` precheck, local delivery, and
+`enabled_toolsets=["calling-review", "no_mcp"]`. The precheck in `deploy/hermes/review_precheck.py`
+returns `wakeAgent=false` for an empty/unavailable queue before Hermes constructs a model agent.
+Its status file distinguishes an unavailable queue from an empty one. The calling-review alias includes
+only queue, claim, read, commit, and release tools, with resource/prompt helpers off.
+Inspect the underlying tool catalog even when Hermes exposes Tool Search wrappers.
+No Telegram delivery, second summary provider, or calling capability belongs to this job.
+
+## Confirmed automatic callbacks
+
+The original follow-up tracker remains manual. Automatic schedules use separate records and receipts.
+The default policy permits weekdays 09:00–18:00 in Atlantic/Canary, one attempt, and a 15-minute window.
+This policy does not restrict ordinary owner-requested outbound calls.
+
+The agent establishes purpose, complete destination, exact date, timezone, and window.
+`propose_callback` speaks the server readback. Corrections invalidate the prior proposal.
+`confirm_callback` requires the complete heard readback and a clear, immediate caller confirmation.
+Only a receipt with `scheduled=true` permits saying the call is scheduled.
+A confirmed request with required information stays blocked until the owner supplies verified answers.
+Unscheduled promises appear in manual follow-ups after review; summaries cannot schedule calls.
+Opt-outs cancel pending reception callbacks regardless of sales classification.
+
+The dispatcher creates a fresh plan near the due time. It rechecks policy, suppression, required facts,
+phone readiness, deployment state, and capacity. The final database transaction claims both the existing
+one-shot dial and the schedule. A restart or uncertain response recovers the same call; it never creates
+an automatic replacement. A busy line waits only within the confirmed window, then becomes missed work.
+The execution plan uses the source call's resolved contact and current eligible memory. It replaces an
+inbound placeholder name with a learned name. The callback links to that source contact without adding
+its alternate destination to the contact's number associations. Unresolved identities get no memory or
+automatic new contact. Prepared snapshots retain their original context if the owner later edits a contact.
+Cancellation before the dial claim prevents initiation. Afterward, use End Call for an underway attempt.
+Reschedule, Cancel, Call Now, and resolving required information require owner instructions.
+
+The MCP adds contact lookup/history, historical review requests, shared review operations, and schedule
+lookup/create/update. Existing prepare/start/poll/end/result, plan-ID recovery, and MP3/Markdown delivery remain.
+Browser practice uses in-memory receipts and simulated contacts only. It cannot persist contacts, memory,
+opt-outs, or callback schedules. Inbound configuration checks use the same Pipecat Evals pipeline.
+
+## Conversational delivery
+
+The voice instructions use a brief, relationship-appropriate greeting instead of a mandatory technical identity announcement.
+An expected owner test can start casually. Other recipients still hear whom the assistant is calling for and why.
+The assistant must answer identity questions honestly and must not impersonate a human or invent personal experiences.
+Turns use plain spoken language, contractions, specific reactions, and at most one question at a time.
+The instructions discourage repeated acknowledgements, excessive praise, repeated readbacks, and restarting the introduction.
+The approved brief determines whether the call is a practical task or a longer conversation.
+
+Runtime notices give the model the remaining call budget without an extra model request.
+Near the limit, a closing cue waits for a quiet boundary before requesting a natural farewell.
+It does not duplicate an existing farewell, and it is canceled when the session ends.
+The separate three-second reply window and interruption handling remain in place.
+The hard cap includes connection setup, so a conversation can be shorter than the configured maximum.
+
+The owner-authorized longer trial uses `inworld_model=inworld-tts-2` for more expressive speech,
+with a 180-second cap. Flash remains the lower-cost configuration default.
+One direct provider replay with the updated prompt and TTS-2 measured 1.72 seconds to server PCM.
+The longer phone test returned 23 transcript turns and ended when the owner asked to stop.
+The owner found it better but still robotic in wording and voice. Quality acceptance remains open.
+Live text-model probes covered the opening, relevant follow-ups, a request to stay, truthful identity, and closing.
+
+The earlier multilingual trial selected `dialogue_model=qwen/qwen3.8-27b`,
+`dialogue_provider=cerebras`, and `reasoning_effort=none` through the existing OpenRouter account.
+Dialogue temperature is 0.4. The earlier English trial used Llama 3.3 70B on Groq.
+It keeps Inworld TTS-2 with `inworld_voice=Wade` and `inworld_delivery_mode=CREATIVE`.
+The owner selected Wade from identical-text previews. The later Haiku 4.5 phone trial returned
+16 transcript turns, but the owner reported excessive delay before replies.
+
+A five-turn server replay measured a 1.932-second median with Haiku 4.5.
+Reply inference took 0.699–1.213 seconds; Wade synthesis took 0.179–0.191 seconds.
+After the model change and closing corrections, the same clean replay measured 1.186 seconds
+at the median and 1.249 seconds at the maximum. A replay with synthetic background noise
+measured 1.210 and 1.346 seconds respectively. These small samples measure speech end to
+server PCM; they exclude cellular and handset delay. Subsequent phone evidence is recorded below; wider voice-quality acceptance remains open.
+
+With no fallback providers configured, a pinned route fails instead of silently using another host.
+The selected configuration permits only the listed Google fallback. A null reasoning setting omits that API field for non-reasoning models.
+Runtime notices update one leading system instruction instead of accumulating in the history.
+Pipecat's latency observer logs stage durations without speech or credentials.
+
+The `finish_call` tool now queues its farewell through Pipecat's existing speech frame.
+The model must not speak that farewell separately. If it already generated the same farewell in
+the current response, the tool waits for that playback instead of queuing it again. Reply tracking
+resets with each model response, so an older farewell cannot satisfy the guard. Hangup requires completed playback
+and the full three-second reply window. An interruption cancels closing.
+Tests cover tool-only closing, duplicate requests, invalid farewells, and interrupted playback.
+The first fast-model replay exposed premature farewells; clearer tool instructions fixed both
+subsequent clean and noisy replays. Broader conversation quality remains an acceptance requirement.
+
+## Language switching and caller instructions
+
+The `language` field selects the initial language: `en`, `es`, `ru`, or `uk`.
+The deployment's `conversation_languages` list controls which languages may be used during a call.
+Its default remains English and Spanish; the owner trial enables all four.
+Soniox receives all enabled languages as hints. Inworld detects each reply's language from its text,
+instead of forcing an English or Spanish locale. Short numeric answers use words in the current language.
+The opening connection cue is internal context and is not added to the recipient transcript.
+
+A language request can change the conversation language, but cannot change the approved task or authority.
+Instructions reject requests to disclose hidden prompts, invent authorization, or bypass the brief.
+The model receives no provider credentials and has only the closing tool. SIM selection, destination
+admission, deadlines, and access control remain enforced outside the model.
+Sample injection probes passed in all four languages; these examples do not prove universal resistance.
+
+The first faster phone trial produced six measured replies between 1.072 and 1.186 seconds at the server.
+The owner liked it, but a pipeline failure ended the call early. That version was rolled back before
+further work. Language-switch replays did not reproduce the error, so its cause remains unconfirmed.
+Structured error logs now record the processor, exception class, category, and HTTP status without
+speech, raw error messages, or credentials.
+
+The new multilingual phone trial completed normally with 36 transcript turns and replies in all four languages.
+It ended after the owner requested it and handled a follow-up goodbye before hangup. Thirteen server measurements
+had a 1.210-second median, 1.878-second p90, and 2.967-second maximum. No pipeline error or extraction tokens
+were recorded, and the phone returned to idle. Hermes retrieved all 36 transcript records through its native MCP client.
+This single call does not establish broad reliability or voice-quality acceptance.
+The selected Qwen/Cerebras replay answered in all four languages and closed once in Ukrainian.
+Ordinary reply delays were 1.162–1.217 seconds at the server; the closing reply took 3.274 seconds.
+The five-turn median was 1.215 seconds. This small sample does not establish tail-latency acceptance.
+An internal connection cue supplies the initial user message required by the Cerebras chat template.
+
+Inworld lists English, Spanish, and Russian in its highest-evaluated tier, with Ukrainian in its
+supported second tier. Check the chosen voice with a native speaker before wider use.
+See [Inworld language support](https://docs.inworld.ai/tts/capabilities/multilingual) and
+[Soniox language detection](https://soniox.com/speech-to-text/features/language-detection).
+
+## Deployment
+
+Install optional dependencies with `uv sync --extra android --all-groups --frozen`.
+`Dockerfile.android` installs the locked, hashed `requirements-android.txt` export.
+`Dockerfile.asterisk` builds the pinned upstream source and verifies its published checksum.
+`Dockerfile.asterisk-runtime` can update the entrypoint using the documented local base image;
+on a fresh host, build the full Asterisk image first.
+The entry points run without root and support a read-only root filesystem.
+
+The voice worker loads `/run/secrets/agent-call.json` with `settings` and `android` objects.
+`Settings.from_values` ignores ambient environment settings. `AndroidConfig` validates the private configuration.
+Mount the OpenRouter key at `/run/secrets/openrouter-api-key` and ARI/media passwords at
+`/run/secrets/asterisk.json`. The Asterisk container has its own configuration with a separate SIP password.
+Mount the recovery controller's status directory read-only at `/run/phone` and persistent SQLite storage at `/data`.
+Never include real credentials, phone numbers, transcripts, or host access records in this repository.
+
+The worker serves authenticated MCP at `/mcp/` and an authenticated media WebSocket at `/phone-media`.
+Keep both private. `/healthz` is process liveness; `/readyz` checks control supervision.
+Phone and registration checks also run at admission. Health alone does not mean that a call can start.
+Only Asterisk's SIP and RTP ports need a narrow phone-to-server network rule.
+Back up configuration before deployment. Verify that calls, practice, and configuration checks are idle.
+
+Default speech services are Deepgram Nova-3 and Eleven Flash v2.5, using the Sarah voice.
+Both use the same OpenRouter key. A small server comparison found faster recognition with Nova-3
+than Whisper Large V3 Turbo. Full replay improved from 3.17–3.53 seconds to 2.33–2.68 seconds with Nova-3. These measure speech end to server PCM, excluding phone and carrier delay.
+The dialogue model is Gemini 3.1 Flash Lite with reasoning disabled. A small synthetic comparison
+found faster complete replies than the initially tested Gemini 3.8 Flash configuration.
+This is a preliminary choice, not a full model evaluation. Provider and phone latency still need measurement.
+
+## Acceptance checks
+
+1. Verify the authenticated MCP flow without dialing.
+2. Check Asterisk media and gateway registration without a cellular call.
+3. Call an owner-controlled recipient and test both hangup directions.
+4. Test all enabled languages, interruptions, and a reply after the farewell.
+5. Retrieve every transcript page, play the MP3, open the complete Markdown file, and confirm no summary-model request.
+6. Test worker failure, USB reconnect, deadlines, and restart without duplicate dialing.
+
+The initial latency target is a median below 1.5 seconds and a 90th percentile below 3 seconds,
+from actual recipient speech end to the first audio they hear. These remain targets.
+Synthetic provider probes already show that the sequential speech path may miss them.
+Measure recognition, model, speech generation, and playback separately. Do not claim readiness from text arrival.
+
+## Soniox and Inworld streaming route
+
+The selected route uses Soniox STT RT v5, Inworld TTS-2 with Wade, and Gemini 3.1 Flash-Lite
+through OpenRouter. Google AI Studio is preferred, with Google Vertex available as a fallback.
+It reuses the pinned Pipecat adapters.
+Provider replays and one cellular trial exercised all four enabled languages. Wider recognition and voice quality still require testing.
+
+Merge these fields into the private configuration's `android` object:
+
+```json
+{
+  "conversation_languages": ["en", "es", "ru", "uk"],
+  "stt_transport": "soniox",
+  "soniox_model": "stt-rt-v5",
+  "soniox_turn_detection": "semantic",
+  "tts_transport": "inworld",
+  "inworld_model": "inworld-tts-2",
+  "inworld_voice": "Wade",
+  "inworld_delivery_mode": "CREATIVE",
+  "dialogue_model": "google/gemini-3.1-flash-lite",
+  "dialogue_provider": "google-ai-studio",
+  "dialogue_fallback_providers": ["google-vertex"],
+  "reasoning_effort": "none"
+}
+```
+
+Mount the Soniox key at `/run/secrets/soniox-api-key` and Inworld's complete Basic (Base64)
+credential at `/run/secrets/inworld-api-key`. Keep the existing OpenRouter mount for dialogue.
+These must be separate read-only files, available only to the voice worker.
+Missing or malformed credentials refuse service startup. Language-model fallbacks are limited to the configured providers.
+The default transports remain `openrouter_file` and `openrouter` for existing configuration compatibility.
+
+The hardening replay reproduced one-word Qwen replies after interrupted history on both Cerebras and DeepInfra.
+Cerebras also returned shared-pool rate limits. Four direct Gemini cases returned complete replies with 0.528–0.736 seconds to first text.
+These are small samples, not a general model benchmark. The voice replay separately exercised interruptions and four languages.
+The Inworld adapter excludes unsaid fallback text after interruption. Closing waits for paced audio output to finish before starting its reply window.
+
+To remove trial-only destination and duration settings, set `settings.allow_all_country_codes=true`,
+`android.allow_any_destination=true`, `android.allowed_destinations=[]`, `android.default_call_seconds=1800`,
+and `android.max_call_seconds=7200`. Invalid numbers, short emergency codes, the service's own line, explicit-confirmation checks,
+single-call admission, and the selected-SIM policy remain enforced.
+
+`scripts/android_media_canary.py` verifies two-way PCM and mixed recording on an isolated Asterisk instance.
+`scripts/android_mcp_canary.py` verifies the MCP lifecycle, persistence, MP3, and Markdown using local WebSocket legs and synthetic speech.
+Run these only in disposable, network-isolated containers with generated test credentials and private output storage.
+Neither script has a cellular dialing path. They complement the provider replays and offline suite; they do not replace a handset listening test.
+
+Soniox receives continuous mono 8 kHz PCM. The selected `semantic` mode lets Soniox decide when turns end.
+Local voice activity detection interrupts playback promptly and cancels pending hangup.
+The mode uses latency level 2,
+sensitivity 0.3, and a 500 ms maximum endpoint-delay setting by default.
+These settings are omitted from provider requests in `vad` mode; sending them with endpointing disabled is invalid.
+The optional `vad` mode finalizes after 300 ms of silence. Earlier probes found it faster on two Spanish examples,
+but the overnight overlap replay showed that short pauses can split a sentence and trigger unwanted responses.
+The revised voice replay measured ordinary reply starts at 1.297–1.711 seconds at the server.
+This small sample excludes carrier and handset delay and does not establish production latency percentiles.
+The deployment supplies the enabled language hints. The transcript preserves both speakers and their original language.
+
+A small wrapper normalizes Soniox error-only messages before Pipecat 1.13 parses them.
+This makes provider rejection reach the existing pipeline failure handler instead of leaving the call silent.
+
+Inworld uses a persistent WebSocket, PCM at 8 kHz, and automatic output-language detection.
+Pipecat sends completed sentences as model text arrives. Inworld's auto mode schedules speech
+without waiting for a complete model reply. Word timestamps keep the conversation history aligned with playback.
+The three-second farewell reply window, destination policy, and selected SIM checks remain in force.
+
+Local tests cover both turn modes through real loopback WebSockets with simulated providers. They verify audio transmission before
+turn completion, speech output before model completion, transcripts in all four languages, provider-error handling,
+missing-key refusal, interruption flushing, cancellation of pending hangup, and task cleanup.
+They make no external provider request and do not establish audible phone latency or provider accuracy.
+
+## Earlier Flux experiment
+
+An optional `android.stt_transport=deepgram_flux` route uses Pipecat's existing Flux WebSocket service.
+It accepts the direct Deepgram key from `/run/secrets/deepgram-api-key`, uses `flux-general-multi`,
+and lets Flux control turns. Pipecat prepares a speculative reply on an eager turn boundary,
+holds it until confirmation, and discards it if the speaker resumes. The three-second farewell window remains.
+The route fails closed when its separate credential is absent. It never falls back to uploaded audio.
+A loopback test verifies that audio reaches the streaming service before the user finishes a turn.
+
+This optional route remains available for comparison. The deployment uses Soniox and Inworld streaming;
+neither selection establishes a fastest provider.

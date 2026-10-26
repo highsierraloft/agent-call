@@ -2,8 +2,16 @@
 
 # Agent Call
 
-[![CI](https://github.com/XiyaoWang0519/agent-call/actions/workflows/ci.yml/badge.svg)](https://github.com/XiyaoWang0519/agent-call/actions/workflows/ci.yml)
-[![Secret scan](https://github.com/XiyaoWang0519/agent-call/actions/workflows/secret-scan.yml/badge.svg)](https://github.com/XiyaoWang0519/agent-call/actions/workflows/secret-scan.yml)
+This fork adds Samsung SIM calling, a private control panel, versioned personalities,
+browser voice practice, and MP3/Markdown results through MCP. The panel can start and stop
+calls, search transcripts, play recordings, and edit the guide Hermes reads before calling.
+See the [control panel setup](docs/samsung-openrouter.md#private-control-panel).
+Automated integration checks pass; post-hardening
+handset validation remains open. The existing upstream live path described below requires
+OpenAI and Twilio. See the [fork status and acceptance checks](docs/samsung-openrouter.md).
+
+[![CI](https://github.com/highsierraloft/agent-call/actions/workflows/ci.yml/badge.svg)](https://github.com/highsierraloft/agent-call/actions/workflows/ci.yml)
+[![Secret scan](https://github.com/highsierraloft/agent-call/actions/workflows/secret-scan.yml/badge.svg)](https://github.com/highsierraloft/agent-call/actions/workflows/secret-scan.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -51,7 +59,7 @@ agent-call smoke-prepare
 
 A successful smoke check prints `OK prepare-only smoke`: it connects, lists the seven tools, and prepares a plan. **It does not make a call.** Evaluation mode blocks starting calls with `live_calls_disabled`.
 
-Contributing from source? Clone this repository, run `uv sync --all-groups --frozen`, and prefix the commands above with `uv run`. For Docker evaluation, run `docker compose up --build` from the checkout and use the same health and smoke checks (`uv run agent-call smoke-prepare`). Docker Compose exposes the service on the host's loopback address and keeps SQLite in a named volume. See [troubleshooting](docs/troubleshooting.md) for errors.
+Contributing from source? Clone this repository, run `uv sync --extra android --all-groups --frozen`, and install FFmpeg/ffprobe for the recording checks. Run `bash scripts/verify.sh` for the full fork's offline gate. Prefix the commands above with `uv run`. For Docker evaluation, run `docker compose up --build` from the checkout and use the same health and smoke checks (`uv run agent-call smoke-prepare`). Docker Compose exposes the service on the host's loopback address and keeps SQLite in a named volume. See [troubleshooting](docs/troubleshooting.md) for errors.
 
 ## 2. Start with automatic local setup
 

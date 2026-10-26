@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
+import secrets
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Response, WebSocket
 from fastmcp import FastMCP
 
+from app.android_config import AndroidConfig
+from app.call_control import CallControl
 from app.call_state import CallService
 from app.db import Database
 from app.mcp_oauth.constants import OAUTH_MCP_PATH
@@ -30,11 +34,15 @@ logger = logging.getLogger(__name__)
 LIFESPAN_CLEANUP_STEP_TIMEOUT_SECONDS = 15.0
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None, *, android_config: AndroidConfig | None = None
+) -> FastAPI:
     settings = settings or Settings()
+    if settings.call_backend == "android_openrouter" and android_config is None:
+        raise ValueError("The Android backend requires private Android configuration")
     mcp = FastMCP("Agent Phone-Call Bridge")
 
-    def get_service() -> CallService:
+    def get_service() -> CallControl:
         # `app` is assigned below; this closure is only ever invoked once the
         # server is handling requests, by which point it is bound. Reading from
         # app.state keeps MCP tools and HTTP routes on the same access path.
@@ -43,7 +51,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise RuntimeError("service is not started")
         return service  # type: ignore[no-any-return]
 
-    register_tools(mcp, get_service)
+    register_tools(mcp, get_service, android_backend=settings.call_backend == "android_openrouter")
     mcp_http_app = mcp.http_app(
         path="/",
         transport="streamable-http",
@@ -57,7 +65,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if settings.mcp_oauth_enabled:
         mcp_oauth_provider = MCPOAuthProvider(settings)
         oauth_mcp = FastMCP("Agent Phone-Call Bridge", auth=mcp_oauth_provider)
-        register_tools(oauth_mcp, get_service, oauth=True)
+        register_tools(
+            oauth_mcp,
+            get_service,
+            oauth=True,
+            android_backend=settings.call_backend == "android_openrouter",
+        )
         oauth_mcp_app = oauth_mcp.http_app(
             path=OAUTH_MCP_PATH,
             transport="streamable-http",
@@ -73,12 +86,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         db = Database(settings.database_path)
         await db.initialize()
         openai = None
-        service: CallService | None = None
+        service: CallControl | None = None
         primary_error: BaseException | None = None
         cleanup_errors: list[BaseException] = []
         try:
-            openai = create_openai_client(settings)
-            service = CallService(settings, db, openai=openai)
+            if settings.call_backend == "android_openrouter":
+                from app.android_calls import AndroidCallService
+                from app.asterisk_client import AsteriskClient
+                from app.phone_status import PhoneStatus
+
+                assert android_config is not None
+                credentials = android_config.asterisk_credentials()
+                api_key = android_config.openrouter_key().get_secret_value()
+                app.state.media_authorization = (
+                    "Basic "
+                    + base64.b64encode(
+                        ("asterisk:" + credentials["media_password"]).encode()
+                    ).decode()
+                )
+                service = AndroidCallService(
+                    settings,
+                    db,
+                    config=android_config,
+                    asterisk=AsteriskClient(
+                        base_url=android_config.asterisk_url,
+                        username="agent-call",
+                        password=credentials["ari_password"],
+                    ),
+                    phone=PhoneStatus(
+                        android_config.phone_status_file,
+                        selected_slot=android_config.selected_sim_slot,
+                    ),
+                    api_key=api_key,
+                )
+            else:
+                openai = create_openai_client(settings)
+                service = CallService(settings, db, openai=openai)
             app.state.call_service = service
             if mcp_oauth_provider is not None:
                 mcp_oauth_provider.attach_database(db)
@@ -148,9 +191,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(WebhookBodyLimitMiddleware)
     app.state.settings = settings
     app.state.mcp = mcp
-    app.include_router(openai_webhooks.router)
-    app.include_router(twilio_webhooks.router)
-    app.include_router(debug.router)
+    if settings.call_backend == "twilio_openai":
+        app.include_router(openai_webhooks.router)
+        app.include_router(twilio_webhooks.router)
+        app.include_router(debug.router)
+    else:
+        from app.routes import control, reception
+
+        app.include_router(control.router)
+        app.include_router(reception.router)
+
+        @app.websocket("/phone-media")
+        async def phone_media(websocket: WebSocket) -> None:
+            expected = getattr(app.state, "media_authorization", "")
+            supplied = websocket.headers.get("authorization", "")
+            if not expected or not secrets.compare_digest(supplied.encode(), expected.encode()):
+                await websocket.close(code=1008)
+                return
+            service = getattr(app.state, "call_service", None)
+            if service is None:
+                await websocket.close(code=1013)
+                return
+            await service.media_session(websocket)
+
     app.include_router(deployment.router)
 
     @app.get("/healthz", include_in_schema=False)

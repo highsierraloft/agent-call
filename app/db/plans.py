@@ -49,17 +49,48 @@ class PlansMixin:
         context: dict[str, Any],
         authority_basis: str | None,
         expires_at: datetime,
+        configuration_snapshot: dict[str, Any] | None = None,
     ) -> None:
         now = _iso_now()
-        await self.execute(
-            """INSERT INTO plans
-               (plan_id, state, context_json, authority_basis, created_at, expires_at)
-               VALUES (?, 'prepared', ?, ?, ?, ?)""",
-            (plan_id, json.dumps(context), authority_basis, now, expires_at.isoformat()),
-        )
+        async with self._immediate_transaction() as conn:
+            await conn.execute(
+                "INSERT INTO plans (plan_id,state,context_json,authority_basis,created_at,expires_at) "
+                "VALUES (?,'prepared',?,?,?,?)",
+                (
+                    plan_id,
+                    json.dumps(
+                        {
+                            key: value
+                            for key, value in context.items()
+                            if key != "profile_id"
+                            and not (key == "direction" and value == "outbound")
+                        }
+                    ),
+                    authority_basis,
+                    now,
+                    expires_at.isoformat(),
+                ),
+            )
+            if configuration_snapshot is not None:
+                await conn.execute(
+                    "INSERT INTO plan_configurations VALUES (?,?)",
+                    (plan_id, json.dumps(configuration_snapshot, ensure_ascii=False)),
+                )
+                if configuration_snapshot.get("followup_id"):
+                    await conn.execute(
+                        "INSERT INTO call_followup_plans VALUES (?,?,?)",
+                        (configuration_snapshot["followup_id"], plan_id, now),
+                    )
 
     async def get_plan(self: DatabaseAccess, plan_id: str) -> dict[str, Any] | None:
-        return await self.fetch_one("SELECT * FROM plans WHERE plan_id = ?", (plan_id,))
+        row = await self.fetch_one(
+            "SELECT p.*, c.snapshot_json FROM plans p LEFT JOIN plan_configurations c USING(plan_id) WHERE p.plan_id=?",
+            (plan_id,),
+        )
+        if row is not None:
+            snapshot = json.loads(row["snapshot_json"]) if row.get("snapshot_json") else {}
+            row["context"]["profile_id"] = snapshot.get("profile_id")
+        return row
 
     async def get_plan_record(self: DatabaseAccess, plan_id: str) -> PlanRecord | None:
         """Typed adapter over the same read used by :meth:`get_plan`."""
@@ -105,7 +136,9 @@ class PlansMixin:
                 )
             cursor = await conn.execute(
                 """UPDATE plans SET state='started', call_id=?, confirmation_text=?
-                   WHERE plan_id=? AND state='prepared' AND expires_at>?""",
+                   WHERE plan_id=? AND state='prepared' AND expires_at>?
+                   AND NOT EXISTS (SELECT 1 FROM call_followup_plans fp JOIN call_followups f
+                   USING(followup_id) WHERE fp.plan_id=plans.plan_id AND (f.status != 'ready' OR json_array_length(json_extract(f.value_json,'$.needed_information')) > 0))""",
                 (call_id, confirmation_text, plan_id, now),
             )
             if cursor.rowcount != 1:

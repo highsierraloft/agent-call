@@ -1,12 +1,24 @@
 # Repository Guidelines
 
+## Fork scope
+
+This fork adds a Samsung SIM and OpenRouter route for a private Hermes deployment.
+Keep the existing MCP contract and persistence where practical. The requesting agent
+interprets the transcript; the deployment disables inline post-call model extraction.
+Reception reviews use the existing Hermes account and a durable local queue.
+Keep inbound answering off until business setup and selected-SIM handset acceptance pass.
+Practice must not persist contacts, memory, opt-outs, or schedules. Never retry an uncertain callback dial.
+Keep documentation aligned with behavior and distinguish simulated transport checks
+from real phone tests. Never copy local credentials, transcripts, or host access records
+into this repository. The upstream Fly deployment is outside this fork's scope.
+
 ## Project Structure & Module Organization
 
 `app/` contains the Python service. `main.py` assembles FastAPI and FastMCP; `routes/` handles OpenAI, Twilio, debug, and deployment callbacks through explicit `CallService` methods (routes never touch `service.db` directly); `call_state.py` (the `CallService` facade and call state machine), `call_activity.py` (liveness/heartbeat tracking), `owner_transfer.py` (the owner-transfer saga), `twilio_bridge.py`, and `openai_live.py` coordinate live calls; and the `db/` package (a `Database` facade composed from per-concern modules: engine, plans, deployment, calls, transfers, termination, telemetry, webhooks, transcripts, questions), `models.py`, `policy.py`, and `security.py` own persistence, schemas, call policy, and authentication. Tests mirror these concerns in `tests/test_*.py`, with shared fixtures in `tests/conftest.py`. Operational files live at the repository root (`Dockerfile`, `fly.toml`, `render.yaml`), while `scripts/run_sip_canary.py` performs live end-to-end validation and `scripts/live_smoke.sh` boots the app with dummy credentials for a local MCP smoke test.
 
 ## Build, Test, and Development Commands
 
-- `uv sync --all-groups --frozen`: install dependencies from `uv.lock`.
+- `uv sync --extra android --all-groups --frozen`: install the full fork's locked dependencies. Install FFmpeg/ffprobe for recording tests.
 - `uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload`: run the local service with reload.
 - `uv run ruff format --check app tests scripts`: verify formatting.
 - `uv run ruff check app tests scripts`: run configured lint and import checks.
@@ -69,7 +81,7 @@ Notes below cover gotchas that are non-obvious from the sections above.
 - Startup gotcha: do NOT put `ALLOWED_COUNTRY_CODES` in `.env.local` (or any dotenv file). pydantic-settings JSON-decodes list-typed fields from dotenv files, so `ALLOWED_COUNTRY_CODES=+1` crashes boot with a `SettingsError`. Omit it and rely on the `+1` default.
 - The full end-to-end SIP canary (`scripts/run_sip_canary.py`) places a real billable call and needs real credentials, a public tunnel, and a human with a phone; do not run it in CI or an unattended environment. Practical verification is: `ruff format --check` + `ruff check`, `pytest -q` (all externals are mocked in `tests/conftest.py`, temp SQLite), boot the server, and drive the MCP tools via `scripts/live_smoke.sh`.
 - The separate `python -m scripts.live_phone` harness supports unattended billable tests only against an explicitly configured test instance and dedicated automated callee/owner numbers. Follow `docs/live-phone-runbook.md`; keep the independent reaper running, and never fall back to a personal number. Its credential-free regression tests run in ordinary pytest; live runs require provisioned test infrastructure and explicit instance confirmation.
-- MCP smoke test: the endpoint is `/mcp/` (Streamable HTTP) and requires both `Authorization: Bearer <MCP_BEARER_TOKEN>` and `X-Agent-User-Id: <ALLOWED_AGENT_USER_ID>`. `prepare_phone_call` runs without any external service (validates destination policy + persists a plan to SQLite); its `context.owner.callback_number` and `escalation.owner_phone` must equal `OWNER_PHONE_E164`, and a persisted `plan_id` is only returned once `authority_basis` (or `requested_by_owner`) is supplied.
+- MCP smoke test: the endpoint is `/mcp/` (Streamable HTTP) and requires both `Authorization: Bearer <MCP_BEARER_TOKEN>` and `X-Agent-User-Id: <ALLOWED_AGENT_USER_ID>`. `prepare_phone_call` runs without any external service (validates destination policy + persists a plan to SQLite); omitted `context.owner.callback_number` and `escalation.owner_phone` resolve from `OWNER_PHONE_E164`, and a persisted `plan_id` is only returned once `authority_basis` (or `requested_by_owner`) is supplied.
 
 ### Resuming automated live testing
 
@@ -82,3 +94,22 @@ Notes below cover gotchas that are non-obvious from the sections above.
   Verify current processes, URLs and idle calls; old session state is not live evidence.
 - A normal pytest/MCP smoke pass is not a phone test. Report a live PASS only from that
   run's audio, tool evidence, all assertions and verified cleanup without forced hangup.
+
+
+## Control panel
+
+The private dashboard is in `dashboard/`; its proxy is in `deploy/control/`. Keep its docs,
+API types, and deployment definitions aligned with behavior changes.
+
+- Keep the proxy's exact host-peer check, Tailscale owner check, worker bridge authentication,
+  origin checks, and CSRF protection. A container peer must not impersonate the owner through
+  a forged identity header. Never put provider, MCP, or infrastructure credentials in browser code.
+- Save configuration as new revisions. Prepared plans and active calls retain their snapshots.
+  Do not reconstruct missing historical snapshots or load configuration in the audio loop.
+- Browser practice has no dialing capability and cannot change real recipient opt-outs.
+  It shares capacity with phone calls and must release provider resources after cancellation.
+- Keep the call AI input inspector tied to the same prompt, tool, and parameter builders used by execution.
+  Capture only the latest serialized model request body; exclude headers and credentials. Do not parse
+  or persist large request bodies in the audio path. Mark missing historical request data explicitly.
+- Run the backend gate and `npm ci && npm run build && npm test` in `dashboard/` for relevant changes.
+  Browser regression tests use mocked APIs. Label live-provider practice separately from handset tests.

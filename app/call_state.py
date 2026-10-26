@@ -19,11 +19,10 @@ from twilio.base.exceptions import TwilioRestException
 from app.agent_push import push_message_to_agent
 from app.call_activity import CallActivityTracker
 from app.call_audio import CallAudio
+from app.call_planning import claim_approved_call, confirmation_summary, prepare_call
 from app.costs import compute_call_cost
 from app.db import (
-    ClaimOutcome,
     Database,
-    DeploymentLockedError,
     LatencyMark,
     LatencyStage,
 )
@@ -55,7 +54,6 @@ from app.models import (
 from app.openai_client import create_openai_client
 from app.openai_live import LIVE_SEND_TIMEOUT_SECONDS, LiveBridge
 from app.owner_transfer import OwnerTransferCoordinator
-from app.policy import validate_context
 from app.records import (
     AnswerCommand,
     LifecycleRecord,
@@ -463,47 +461,10 @@ class CallService:
 
     @staticmethod
     def _confirmation_summary(packet: ContextPacket) -> str:
-        target = packet.target
-        return (
-            f"Call {target.name}"
-            f"{f' at {target.organization}' if target.organization else ''} "
-            f"on {target.phone} to: {packet.objective}. "
-            "The assistant may only make the listed allowed commitments and will follow all "
-            "hard constraints."
-        )
+        return confirmation_summary(packet)
 
     async def prepare(self, request: PreparePhoneCallInput) -> PreparePhoneCallOutput:
-        missing: list[str] = []
-        if not request.requested_by_owner:
-            missing.append("requested_by_owner")
-        if not request.authority_basis:
-            missing.append("authority_basis")
-        errors = validate_context(request.context, self.settings)
-        if errors:
-            # Policy codes (invalid_e164 and friends) are a separate domain registry;
-            # CallRefusal carries them through unchanged.
-            first = errors[0]
-            raise CallRefusal(first.code, first.message, details=first.details)
-        summary = self._confirmation_summary(request.context)
-        if missing:
-            return PreparePhoneCallOutput(
-                confirmation_summary=summary,
-                missing_fields=missing,
-            )
-        plan_id = f"plan_{secrets.token_urlsafe(18)}"
-        expires_at = datetime.now(UTC) + timedelta(seconds=self.settings.plan_ttl_seconds)
-        await self.db.create_plan(
-            plan_id,
-            request.context.model_dump(mode="json"),
-            request.authority_basis,
-            expires_at,
-        )
-        return PreparePhoneCallOutput(
-            plan_id=plan_id,
-            confirmation_summary=summary,
-            missing_fields=[],
-            expires_at=expires_at,
-        )
+        return await prepare_call(self.settings, self.db, request)
 
     async def _run_latency_marked_step(
         self,
@@ -929,31 +890,14 @@ class CallService:
             raise live_calls_disabled_error()
         if not self.supervision_ready():
             raise CallRefusal(ErrorCode.SUPERVISION_UNAVAILABLE)
-        if not explicit_confirmation or not confirmation_text.strip():
-            raise CallRefusal(ErrorCode.CONFIRMATION_REQUIRED)
-        plan = await self.db.get_plan_record(plan_id)
-        if plan is None:
-            raise CallRefusal(ErrorCode.PLAN_NOT_FOUND)
-        packet = plan.context
-        if confirmation_text.strip() != self._confirmation_summary(packet):
-            raise CallRefusal(ErrorCode.CONFIRMATION_MISMATCH)
-        call_id = f"call_{secrets.token_urlsafe(18)}"
-        conference_name = f"agent-{secrets.token_hex(16)}"
-        try:
-            claimed = await self.db.claim_plan_and_create_call(
-                plan_id=plan_id,
-                call_id=call_id,
-                conference_name=conference_name,
-                confirmation_text=confirmation_text,
-            )
-        except DeploymentLockedError as exc:
-            raise CallRefusal(ErrorCode.DEPLOYMENT_IN_PROGRESS) from exc
-        if not claimed:
-            if claimed.outcome is ClaimOutcome.BUSY:
-                raise CallRefusal(ErrorCode.CALL_BUSY)
-            if claimed.outcome is ClaimOutcome.CALL_ENDING:
-                raise CallRefusal(ErrorCode.CALL_ENDING)
-            raise CallRefusal(ErrorCode.PLAN_UNAVAILABLE)
+        approved = await claim_approved_call(
+            self.db,
+            plan_id=plan_id,
+            explicit_confirmation=explicit_confirmation,
+            confirmation_text=confirmation_text,
+        )
+        call_id = approved.call_id
+        conference_name = approved.conference_name
         participant = await self._run_owned_remote_create(
             call_id,
             lambda: self.twilio.create_agent_participant(
@@ -3384,6 +3328,15 @@ class CallService:
         }
         return True
 
+    async def get_plan_status(self, plan_id: str) -> dict[str, Any]:
+        from app.call_lookup import lookup_plan
+
+        status = await lookup_plan(self.db, plan_id)
+        if status["call_id"]:
+            snapshot = await self.get_snapshot(status["call_id"])
+            return {**snapshot.model_dump(mode="json", exclude={"result"}), "plan_id": plan_id}
+        return status
+
     async def get_snapshot(self, call_id: str) -> CallSnapshot:
         call = await self.db.get_call(call_id)
         if call is None:
@@ -3407,9 +3360,12 @@ class CallService:
             cost=compute_call_cost(call, self.settings),
         )
 
-    async def get_result(self, call_id: str) -> dict[str, Any]:
+    async def get_result(self, call_id: str, *, after_sequence: int = 0) -> dict[str, Any]:
+        if after_sequence < 0:
+            raise ValueError("after_sequence must be non-negative")
         snapshot = await self.get_snapshot(call_id)
         cost = snapshot.cost
+        result = None
         if snapshot.state in TERMINAL_STATES:
             result = snapshot.result
             if result is None or result.finalization_status == "telephony_only":
@@ -3419,17 +3375,16 @@ class CallService:
                 call = await self.db.get_call(call_id)
                 if call is not None:
                     cost = compute_call_cost(call, self.settings)
-            return {
-                "call_id": call_id,
-                "state": snapshot.state,
-                "result": result.model_dump(mode="json"),
-                "cost": cost.model_dump(mode="json") if cost else None,
-            }
+        turns = await self.db.get_transcript_page(call_id, after_sequence=after_sequence, limit=101)
+        page = turns[:100]
         return {
             "call_id": call_id,
             "state": snapshot.state,
-            "result": None,
+            "result": result.model_dump(mode="json") if result else None,
             "cost": cost.model_dump(mode="json") if cost else None,
+            "transcript": [turn.model_dump(mode="json") for turn in page],
+            "next_transcript_cursor": page[-1].sequence_number if len(turns) > 100 else None,
+            "transcript_is_call_content": True,
         }
 
     # -- Transport-facing delegators -----------------------------------------
